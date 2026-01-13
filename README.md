@@ -157,20 +157,20 @@
    ```bash
    cp .env.example .env
    cp Because.yaml.example Because.yaml
+   # 按需编辑 .env，配置数据库、密钥等
    ```
 
 3. **构建镜像并启动服务**
    ```bash
    # 第一次或修改 Dockerfile 后，先构建镜像
    docker-compose -f docker-compose.dev.yml build
-   #docker-compose.dev.yml也可以选择生成环境的docker-compose.yml
    # 然后启动所有服务（前端、后端、MongoDB、Meilisearch 等）
    docker-compose -f docker-compose.dev.yml up -d
    ```
 
 4. **访问应用**
-   - 前端（开发网关）：`http://localhost:3090`
-   - 后端 API：`http://localhost:3080`
+   - 前端（开发网关）：`http://localhost:4514`
+   - 后端 API：`http://localhost:1145`
 
 5. **查看 / 停止服务**
    ```bash
@@ -180,6 +180,190 @@
    # 停止服务
    docker-compose -f docker-compose.dev.yml down
    ```
+
+### 方式三：Docker 生产环境部署（推荐）
+
+#### 前置要求
+
+- Docker：v20.10+
+- Docker Compose：v2.0+
+- 服务器内存：建议 4GB+（RAG ONNX 模型需要约 500MB 内存）
+- 磁盘空间：建议 10GB+（包含模型文件和依赖）
+
+#### 部署步骤
+
+1. **克隆项目到服务器**
+   ```bash
+   git clone https://github.com/constanji/Because.git
+   cd Because
+   ```
+
+2. **配置环境变量**
+   ```bash
+   # 复制环境变量模板
+   cp .env.example .env
+   cp Because.yaml.example Because.yaml
+   
+   # 编辑 .env 文件，配置必要的环境变量
+   # 特别注意以下配置：
+   # - MONGO_URI: MongoDB 连接字符串
+   # - MEILI_MASTER_KEY: Meilisearch 主密钥
+   # - 各种 API 密钥（OpenAI、Anthropic 等）
+   # - USE_ONNX_EMBEDDING: 是否使用 ONNX 嵌入模型（默认 true）
+   nano .env
+   ```
+
+3. **构建 Docker 镜像**
+   ```bash
+   # 方式 A：使用标准 Dockerfile（单阶段构建）
+   docker build -t because:latest -f Dockerfile .
+   
+   # 方式 B：使用多阶段构建 Dockerfile（推荐，构建更快）
+   docker build -t because:latest -f Dockerfile.multi .
+   
+   # 如果使用私有镜像仓库，可以推送到仓库
+   # docker tag because:latest your-registry.com/because:latest
+   # docker push your-registry.com/because:latest
+   ```
+
+4. **配置 docker-compose.yml**
+   
+   编辑 `docker-compose.yml`，确保以下配置正确：
+   - **端口映射**：根据服务器实际情况调整 `API_PORT`、`MONGO_PORT`、`MEILI_PORT`、`VECTOR_DB_PORT`
+   - **镜像名称**：如果使用自定义镜像，修改 `image` 字段
+   - **环境变量**：确保 `.env` 文件中的变量正确传递
+
+5. **启动所有服务**
+   ```bash
+   # 启动所有服务（API、MongoDB、Meilisearch、VectorDB）
+   docker-compose up -d
+   
+   # 查看服务状态
+   docker-compose ps
+   
+   # 查看日志
+   docker-compose logs -f
+   ```
+
+6. **验证部署**
+   ```bash
+   # 检查 API 服务是否正常
+   curl http://localhost:4080/api/health
+   
+   # 检查 MongoDB
+   docker-compose exec mongodb mongosh --eval "db.version()"
+   
+   # 检查 Meilisearch
+   curl http://localhost:8700/health
+   ```
+
+7. **访问应用**
+   - 前端访问：`http://your-server-ip:4080`
+   - API 端点：`http://your-server-ip:4080/api`
+
+#### 注意事项
+
+##### 1. RAG 嵌入式模型（ONNX）
+
+项目使用本地 ONNX 模型进行文本向量化，模型文件位于：
+- `api/server/services/RAG/onnx/embedding/resources/` - 嵌入模型
+- `api/server/services/RAG/onnx/reranker/resources/` - 重排序模型
+
+**确保模型文件已包含**：
+- Dockerfile 会自动复制这些文件（通过 `COPY . .` 命令）
+- 模型文件大小约 200-500MB，首次构建可能需要较长时间
+- 如果模型文件缺失，RAG 功能会自动回退到其他嵌入方式（如 OpenAI API）
+
+**环境变量配置**：
+```bash
+# .env 文件
+USE_ONNX_EMBEDDING=true          # 启用 ONNX 嵌入（默认 true）
+EMBEDDING_MODEL=onnx             # 使用 ONNX 模型
+ALLOW_NO_EMBEDDING=false         # 是否允许无嵌入保存（生产环境建议 false）
+```
+
+##### 2. Plotly 可视化图表
+
+项目使用 Plotly.js 生成可视化图表（通过 BeCauseSkills 的 chart-generation-tool）：
+- Plotly 依赖已包含在 `api/package.json` 中（`plotly.js-dist-min`）
+- Docker 构建时会自动安装
+- 前端通过 CDN 加载 Plotly.js，无需额外配置
+
+**确保功能正常**：
+- 检查网络连接（前端需要加载 Plotly CDN）
+- 如果内网环境，可以考虑将 Plotly.js 打包到前端构建中
+
+##### 3. BeCauseSkills 工具集合
+
+BeCauseSkills 包含多个智能工具（意图分类、RAG 检索、SQL 执行、图表生成等）：
+- 工具代码位于 `BeCauseSkills/` 目录
+- Dockerfile 会自动复制该目录
+- 确保 `BeCauseSkills/index.js` 正确导出所有工具
+
+**验证工具加载**：
+```bash
+# 进入容器检查
+docker-compose exec api node -e "console.log(require('./BeCauseSkills'))"
+```
+
+##### 4. 数据持久化
+
+确保以下目录已正确挂载（在 `docker-compose.yml` 中配置）：
+- `./data-node` - MongoDB 数据目录
+- `./meili_data_v1.12` - Meilisearch 数据目录
+- `./logs` - 应用日志目录
+- `./uploads` - 用户上传文件目录
+- `./images` - 图片资源目录
+
+##### 5. 性能优化建议
+
+- **内存限制**：RAG ONNX 模型需要足够内存，建议容器内存限制至少 2GB
+- **构建优化**：使用 `Dockerfile.multi` 多阶段构建，减少镜像大小
+- **缓存利用**：合理使用 Docker 构建缓存，避免重复构建依赖
+
+#### 更新和维护
+
+```bash
+# 拉取最新代码
+git pull origin main
+
+# 重新构建镜像
+docker-compose build --no-cache
+
+# 重启服务（零停机时间）
+docker-compose up -d --force-recreate
+
+# 查看资源使用情况
+docker stats
+
+# 清理未使用的镜像和容器
+docker system prune -a
+```
+
+#### 故障排查
+
+1. **容器启动失败**
+   ```bash
+   # 查看详细日志
+   docker-compose logs api
+   docker-compose logs mongodb
+   ```
+
+2. **RAG 功能异常**
+   ```bash
+   # 检查 ONNX 模型文件是否存在
+   docker-compose exec api ls -lh api/server/services/RAG/onnx/embedding/resources/
+   
+   # 检查 @xenova/transformers 是否安装
+   docker-compose exec api npm list @xenova/transformers
+   ```
+
+3. **图表无法显示**
+   - 检查浏览器控制台是否有 Plotly.js 加载错误
+   - 确认网络可以访问 Plotly CDN
+   - 检查前端构建是否包含图表相关代码
+
+
    
 
 ---

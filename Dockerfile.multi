@@ -115,12 +115,14 @@ RUN ln -s /app/node_modules/@because /app/node_modules/@Because || true
 COPY api ./api
 COPY config ./config
 COPY specs ./specs
+COPY BeCauseSkills ./BeCauseSkills
 COPY --from=data-provider-build /app/packages/data-provider/dist ./packages/data-provider/dist
 COPY --from=data-schemas-build /app/packages/data-schemas/dist ./packages/data-schemas/dist
 COPY --from=api-package-build /app/packages/api/dist ./packages/api/dist
 COPY --from=client-build /app/client/dist ./client/dist
-# 确保 specs 目录有正确的权限（可读）
-RUN chmod -R 755 /app/specs && find /app/specs -type f -exec chmod 644 {} \;
+# 确保 specs  目录有正确的权限（可读）
+RUN chmod -R 755 /app/specs && find /app/specs -type f -exec chmod 644 {} \; && \
+    chmod -R 755 /app/BeCauseSkills && find /app/BeCauseSkills -type f -exec chmod 644 {} \;
 # 保持 WORKDIR 在 /app，这样 process.cwd() = /app，相对路径 specs/... 会正确解析到 /app/specs/...
 WORKDIR /app
 EXPOSE 3080
