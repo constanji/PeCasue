@@ -114,31 +114,60 @@ class ONNXRerankingService {
         const output = await this.pipeline(inputText);
 
         // 提取分数
-        let score = 0;
+        let rawScore = 0;
         if (Array.isArray(output)) {
           // 如果有多个标签，取最高分的标签
           const maxScoreLabel = output.reduce((max, item) => 
             (item.score > max.score ? item : max)
           );
-          score = maxScoreLabel.score;
+          rawScore = maxScoreLabel.score;
         } else if (typeof output === 'object' && 'score' in output) {
-          score = output.score;
+          rawScore = output.score;
         } else if (typeof output === 'number') {
-          score = output;
+          rawScore = output;
         } else if (output && output.data) {
           // 如果是 Tensor，取第一个值
-          score = Array.from(output.data)[0] || 0;
+          rawScore = Array.from(output.data)[0] || 0;
+        }
+
+        // 确保分数在0-1范围内
+        // text-classification pipeline 通常返回0-1的概率分数，但需要验证
+        let score = rawScore;
+        if (score < 0) {
+          // 如果分数是负数，可能是logits，需要sigmoid归一化
+          score = 1 / (1 + Math.exp(-score));
+        } else if (score > 1) {
+          // 如果分数大于1，可能需要归一化
+          // 使用min-max归一化（假设最大分数为10）
+          score = Math.min(1, score / 10);
         }
 
         results.push({
           text: doc,
           score: score,
+          rawScore: rawScore, // 保留原始分数用于调试
           index: i,
         });
       }
 
       // 按分数降序排序
       results.sort((a, b) => b.score - a.score);
+
+      // 检查是否所有分数都相同（可能是模型输出问题）
+      const scores = results.map(r => r.score);
+      const allSame = scores.length > 0 && scores.every(s => Math.abs(s - scores[0]) < 0.0001);
+      
+      if (allSame && results.length > 1) {
+        logger.warn(`[ONNXRerankingService] 警告：所有重排分数都相同 (${scores[0].toFixed(4)})，可能是模型输出问题`);
+      }
+
+      // 记录分数分布用于调试
+      if (results.length > 0) {
+        const minScore = Math.min(...scores);
+        const maxScore = Math.max(...scores);
+        const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+        logger.debug(`[ONNXRerankingService] 重排分数分布: 最低=${minScore.toFixed(4)}, 最高=${maxScore.toFixed(4)}, 平均=${avgScore.toFixed(4)}`);
+      }
 
       // 返回前K个结果
       const topResults = results.slice(0, topK).map(item => ({

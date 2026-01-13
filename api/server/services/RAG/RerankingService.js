@@ -83,6 +83,15 @@ class RerankingService {
         // 调用 ONNX 重排器
         const rerankedHighlights = await this.reranker.service.rerank(query, documents, topK);
 
+        // 检查重排分数是否都相同（可能是模型问题）
+        const rerankScores = rerankedHighlights.map(h => h.score || 0);
+        const allSameScore = rerankScores.length > 1 && 
+          rerankScores.every(s => Math.abs(s - rerankScores[0]) < 0.0001);
+        
+        if (allSameScore) {
+          logger.warn(`[RerankingService] 警告：重排器返回的所有分数都相同 (${rerankScores[0].toFixed(4)})，使用原始检索分数`);
+        }
+
         // 将重排结果映射回原始结果
         const rerankedResults = rerankedHighlights.map(highlight => {
           // 找到对应的原始结果
@@ -91,11 +100,17 @@ class RerankingService {
           );
 
           if (originalResult) {
+            // 如果重排分数都相同，使用原始分数；否则使用重排分数
+            const finalScore = allSameScore 
+              ? (originalResult.score || originalResult.similarity || 0)
+              : (highlight.score !== undefined && highlight.score !== null ? highlight.score : (originalResult.score || originalResult.similarity || 0));
+            
             return {
               ...originalResult,
-              score: highlight.score || originalResult.score,
-              similarity: highlight.score || originalResult.similarity,
-              reranked: true,
+              score: finalScore,
+              similarity: finalScore,
+              reranked: !allSameScore, // 如果分数都相同，标记为未重排
+              originalScore: originalResult.score || originalResult.similarity || 0, // 保留原始分数用于调试
             };
           }
 
@@ -104,11 +119,20 @@ class RerankingService {
             content: highlight.text,
             score: highlight.score || 0,
             similarity: highlight.score || 0,
-            reranked: true,
+            reranked: !allSameScore,
           };
         });
 
-        logger.info(`[RerankingService] 使用 ONNX 重排了 ${rerankedResults.length} 个结果`);
+        // 记录分数分布用于调试
+        if (rerankedResults.length > 0) {
+          const scores = rerankedResults.map(r => r.score || 0);
+          const minScore = Math.min(...scores);
+          const maxScore = Math.max(...scores);
+          const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+          logger.info(`[RerankingService] 使用 ONNX 重排了 ${rerankedResults.length} 个结果，分数范围: ${(minScore * 100).toFixed(1)}% - ${(maxScore * 100).toFixed(1)}%，平均: ${(avgScore * 100).toFixed(1)}%`);
+        } else {
+          logger.info(`[RerankingService] 使用 ONNX 重排了 ${rerankedResults.length} 个结果`);
+        }
         return rerankedResults;
       }
 
@@ -120,6 +144,15 @@ class RerankingService {
         // 调用重排器
         const rerankedHighlights = await this.reranker.service.rerank(query, documents, topK);
 
+        // 检查重排分数是否都相同
+        const rerankScores = rerankedHighlights.map(h => h.score || 0);
+        const allSameScore = rerankScores.length > 1 && 
+          rerankScores.every(s => Math.abs(s - rerankScores[0]) < 0.0001);
+        
+        if (allSameScore) {
+          logger.warn(`[RerankingService] 警告：重排器返回的所有分数都相同 (${rerankScores[0].toFixed(4)})，使用原始检索分数`);
+        }
+
         // 将重排结果映射回原始结果
         const rerankedResults = rerankedHighlights.map(highlight => {
           const originalResult = results.find(
@@ -127,11 +160,17 @@ class RerankingService {
           );
 
           if (originalResult) {
+            // 如果重排分数都相同，使用原始分数；否则使用重排分数
+            const finalScore = allSameScore 
+              ? (originalResult.score || originalResult.similarity || 0)
+              : (highlight.score !== undefined && highlight.score !== null ? highlight.score : (originalResult.score || originalResult.similarity || 0));
+            
             return {
               ...originalResult,
-              score: highlight.score || originalResult.score,
-              similarity: highlight.score || originalResult.similarity,
-              reranked: true,
+              score: finalScore,
+              similarity: finalScore,
+              reranked: !allSameScore,
+              originalScore: originalResult.score || originalResult.similarity || 0,
             };
           }
 
@@ -139,11 +178,20 @@ class RerankingService {
             content: highlight.text,
             score: highlight.score || 0,
             similarity: highlight.score || 0,
-            reranked: true,
+            reranked: !allSameScore,
           };
         });
 
-        logger.info(`[RerankingService] 使用 ${this.reranker.type} 重排了 ${rerankedResults.length} 个结果`);
+        // 记录分数分布用于调试
+        if (rerankedResults.length > 0) {
+          const scores = rerankedResults.map(r => r.score || 0);
+          const minScore = Math.min(...scores);
+          const maxScore = Math.max(...scores);
+          const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+          logger.info(`[RerankingService] 使用 ${this.reranker.type} 重排了 ${rerankedResults.length} 个结果，分数范围: ${(minScore * 100).toFixed(1)}% - ${(maxScore * 100).toFixed(1)}%，平均: ${(avgScore * 100).toFixed(1)}%`);
+        } else {
+          logger.info(`[RerankingService] 使用 ${this.reranker.type} 重排了 ${rerankedResults.length} 个结果`);
+        }
         return rerankedResults;
       }
 
