@@ -22,6 +22,7 @@ const BeCauseSkills = require(path.join(projectRoot, 'BeCauseSkills'));
  * - SQL校验 (sql-validation)
  * - 结果分析 (result-analysis)
  * - SQL执行 (sql-executor)
+ * - 图表生成 (chart-generation)
  * 
  * 通过统一的 command 参数来调用不同的子工具能力。
  */
@@ -32,8 +33,8 @@ class BeCauseSkillsTool extends Tool {
     'BeCause问数工具 - 智能问数（自然语言转SQL）的完整能力集。' +
     'Commands: intent-classification (意图分类), rag-retrieval (RAG知识检索), ' +
     'database-schema (数据库Schema获取), reranker (结果重排序), sql-validation (SQL校验), ' +
-    'result-analysis (结果分析), sql-executor (SQL执行)。' +
-    '此工具集成了RAG服务、知识库检索、SQL生成与执行等完整问数流程。';
+    'result-analysis (结果分析), sql-executor (SQL执行), chart-generation (图表生成)。' +
+    '此工具集成了RAG服务、知识库检索、SQL生成与执行、数据可视化等完整问数流程。';
 
   schema = z.object({
     command: z.enum([
@@ -44,6 +45,7 @@ class BeCauseSkillsTool extends Tool {
       'sql-validation',
       'result-analysis',
       'sql-executor',
+      'chart-generation',
     ]),
     arguments: z
       .string()
@@ -92,6 +94,10 @@ class BeCauseSkillsTool extends Tool {
         req: this.req,
         conversation: this.conversation, // 传递conversation给SqlExecutorTool
       }),
+      'chart-generation': new BeCauseSkills.ChartGenerationTool({
+        userId: this.userId,
+        req: this.req,
+      }),
     };
   }
 
@@ -99,13 +105,29 @@ class BeCauseSkillsTool extends Tool {
    * 解析 arguments 参数
    */
   parseArguments(argsString) {
+    logger.info('[BeCauseSkillsTool] parseArguments called with:', {
+      argsStringLength: argsString?.length || 0,
+      argsStringPreview: argsString?.substring(0, 200) + (argsString?.length > 200 ? '...' : ''),
+    });
+
     if (!argsString || !argsString.trim()) {
+      logger.warn('[BeCauseSkillsTool] argsString is empty or null');
       return {};
     }
     try {
-      return JSON.parse(argsString);
+      const parsed = JSON.parse(argsString);
+      logger.info('[BeCauseSkillsTool] Successfully parsed arguments:', {
+        hasData: !!parsed.data,
+        dataType: typeof parsed.data,
+        dataLength: Array.isArray(parsed.data) ? parsed.data.length : 'N/A',
+        keys: Object.keys(parsed),
+      });
+      return parsed;
     } catch (error) {
-      logger.warn('[BeCauseSkillsTool] Failed to parse arguments:', error);
+      logger.error('[BeCauseSkillsTool] Failed to parse arguments:', {
+        error: error.message,
+        argsStringPreview: argsString.substring(0, 500) + (argsString.length > 500 ? '...' : ''),
+      });
       return {};
     }
   }
@@ -135,6 +157,51 @@ class BeCauseSkillsTool extends Tool {
 
       // 解析参数
       const args = this.parseArguments(argsString);
+
+      // 特殊处理：如果调用chart-generation且包含sql但没有data，自动先执行SQL查询
+      if (command === 'chart-generation' && args.sql && !args.data) {
+        logger.info('[BeCauseSkillsTool] chart-generation需要SQL查询，先执行sql-executor...');
+
+        try {
+          // 先调用sql-executor执行查询
+          const sqlExecutor = this.tools['sql-executor'];
+          if (!sqlExecutor) {
+            throw new Error('sql-executor工具不可用');
+          }
+
+          const sqlArgs = { sql: args.sql };
+          const sqlResult = await sqlExecutor._call(sqlArgs);
+
+          // 解析SQL执行结果
+          let sqlData;
+          if (typeof sqlResult === 'string') {
+            const parsed = JSON.parse(sqlResult);
+            sqlData = parsed.data;
+          } else if (sqlResult && sqlResult.data) {
+            sqlData = sqlResult.data;
+          }
+
+          if (!sqlData || !Array.isArray(sqlData)) {
+            throw new Error('SQL执行结果无效');
+          }
+
+          // 将SQL查询结果添加到chart-generation的参数中
+          args.data = sqlData;
+          logger.info('[BeCauseSkillsTool] SQL查询成功，获得数据:', {
+            rowCount: sqlData.length,
+            columns: sqlData.length > 0 ? Object.keys(sqlData[0]) : []
+          });
+
+        } catch (sqlError) {
+          logger.error('[BeCauseSkillsTool] SQL查询失败:', sqlError);
+          // 如果SQL查询失败，返回错误信息而不是继续执行
+          return JSON.stringify({
+            success: false,
+            error: `SQL查询失败: ${sqlError.message}`,
+            original_sql: args.sql
+          }, null, 2);
+        }
+      }
 
       // 调用对应的子工具
       const result = await tool._call(args);

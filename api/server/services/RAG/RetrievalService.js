@@ -111,7 +111,7 @@ class RetrievalService {
           const vectorResults = await this.vectorDBService.searchSimilar({
             queryEmbedding,
             types,
-            entityId, // 在向量数据库层面进行数据源隔离，提高效率
+            entityId, 
             topK: topK * 2, // 检索更多结果以便后续过滤
             minScore,
           });
@@ -133,7 +133,7 @@ class RetrievalService {
                 const entry = resultsMap.get(vectorResult.knowledgeEntryId);
                 if (!entry) return null;
 
-                // 双重检查：确保entityId匹配（防御性编程）
+                // 双重检查确保entityId匹配
                 if (entityId && entry.metadata?.entity_id !== entityId) {
                   logger.warn(`[RetrievalService] 发现entityId不匹配的条目: ${vectorResult.knowledgeEntryId}, 期望: ${entityId}, 实际: ${entry.metadata?.entity_id}`);
                   return null;

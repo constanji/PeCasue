@@ -139,14 +139,43 @@ async function processRequiredActions(client, requiredActions) {
     let tool = ToolMap[currentAction.tool] ?? ActionToolMap[currentAction.tool];
 
     const handleToolOutput = async (output) => {
-      requiredActions[i].output = output;
+      // 检查 output 是否是包含 artifact 的对象（来自 invoke 方法）
+      let outputContent = output;
+      let artifact = null;
+      
+      if (output && typeof output === 'object' && !Array.isArray(output)) {
+        if (output.artifact) {
+          // 如果 output 包含 artifact，提取 content 和 artifact
+          artifact = output.artifact;
+          outputContent = output.content || JSON.stringify(output);
+        } else if (output.content !== undefined) {
+          // 如果 output 包含 content 字段，使用它
+          outputContent = output.content;
+          artifact = output.artifact || null;
+        }
+      }
+      
+      // 如果 outputContent 是字符串，尝试解析 JSON 检查是否包含 artifact
+      if (typeof outputContent === 'string') {
+        try {
+          const parsed = JSON.parse(outputContent);
+          if (parsed && typeof parsed === 'object' && parsed.artifact) {
+            artifact = parsed.artifact;
+            outputContent = parsed.content || outputContent;
+          }
+        } catch (e) {
+          // 不是有效的 JSON，继续使用原始字符串
+        }
+      }
+
+      requiredActions[i].output = outputContent;
 
       /** @type {FunctionToolCall & PartMetadata} */
       const toolCall = {
         function: {
           name: currentAction.tool,
           arguments: JSON.stringify(currentAction.toolInput),
-          output,
+          output: outputContent,
         },
         id: currentAction.toolCallId,
         type: 'function',
@@ -157,7 +186,7 @@ async function processRequiredActions(client, requiredActions) {
       const toolCallIndex = client.mappedOrder.get(toolCall.id);
 
       if (imageGenTools.has(currentAction.tool)) {
-        const imageOutput = output;
+        const imageOutput = outputContent;
         toolCall.function.output = `${currentAction.tool} displayed an image. All generated images are already plainly visible, so don't repeat the descriptions in detail. Do not list download links as they are available in the UI already. The user may download the images by clicking on them, but do not mention anything about downloading to the user.`;
 
         // Streams the "Finished" state of the tool call in the UI
@@ -202,10 +231,17 @@ async function processRequiredActions(client, requiredActions) {
         // result: tool.result,
       });
 
-      return {
+      // 如果包含 artifact，将其包含在返回对象中（供 createToolEndCallback 使用）
+      const result = {
         tool_call_id: currentAction.toolCallId,
-        output,
+        output: outputContent,
       };
+      
+      if (artifact) {
+        result.artifact = artifact;
+      }
+
+      return result;
     };
 
     if (!tool) {
@@ -373,18 +409,26 @@ async function processRequiredActions(client, requiredActions) {
     }
 
     try {
-      const promise = tool
-        ._call(currentAction.toolInput)
+      // 使用 invoke 方法以支持返回 artifact
+      const invokeParams = {
+        args: currentAction.toolInput,
+        name: currentAction.tool,
+        id: currentAction.toolCallId,
+        type: 'tool_call',
+      };
+      
+      const promise = (tool.invoke ? tool.invoke(invokeParams) : tool._call(currentAction.toolInput))
         .then((output) => {
           // 如果是speckit工具，记录工具执行结果
           if (currentAction.tool === 'speckit') {
-            const outputPreview = typeof output === 'string' 
-              ? (output.length > 500 ? output.substring(0, 500) + '...' : output)
-              : JSON.stringify(output).substring(0, 500);
+            const outputContent = output?.content || output;
+            const outputPreview = typeof outputContent === 'string' 
+              ? (outputContent.length > 500 ? outputContent.substring(0, 500) + '...' : outputContent)
+              : JSON.stringify(outputContent).substring(0, 500);
             const resultInfo = {
               toolName: currentAction.tool,
               toolCallId: currentAction.toolCallId,
-              outputLength: typeof output === 'string' ? output.length : JSON.stringify(output).length,
+              outputLength: typeof outputContent === 'string' ? outputContent.length : JSON.stringify(outputContent).length,
               outputPreview,
               timestamp: new Date().toISOString(),
             };

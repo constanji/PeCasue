@@ -110,12 +110,17 @@ export default function useSSE(
     });
 
     sse.addEventListener('attachment', (e: MessageEvent) => {
+      console.log('[SSE] ========== Attachment Event Received ==========');
+      console.log('[SSE] Raw event data:', e.data);
       try {
         const data = JSON.parse(e.data);
+        console.log('[SSE] Parsed attachment data:', data);
         attachmentHandler({ data, submission: submission as EventSubmission });
+        console.log('[SSE] Attachment handler called');
       } catch (error) {
-        console.error(error);
+        console.error('[SSE] Error parsing attachment data:', error);
       }
+      console.log('[SSE] ================================================');
     });
 
     sse.addEventListener('message', (e: MessageEvent) => {

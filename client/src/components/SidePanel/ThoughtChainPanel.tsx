@@ -221,6 +221,39 @@ function SidePanelToolCallItem({
     };
   }, [toolCall.name]);
 
+  // BeCauseSkills 子工具名称映射
+  const becauseSkillsCommandMap: Record<string, string> = {
+    'database-schema': '获取数据库Schema',
+    'intent-classification': '意图识别',
+    'rag-retrieval': 'RAG检索',
+    'sql-validation': 'SQL语句验证',
+    'sql-executor': 'SQL执行',
+    'result-analysis': '归因调查',
+    'chart-generation': '可视化图表生成',
+    'reranker': '结果重排序',
+  };
+
+  // 解析工具参数，提取 command
+  const parsedArgs = useMemo(() => {
+    if (typeof toolCall.args === 'string') {
+      try {
+        return JSON.parse(toolCall.args);
+      } catch {
+        return null;
+      }
+    }
+    return toolCall.args;
+  }, [toolCall.args]);
+
+  // 获取子工具名称（如果是 because_skills）
+  const subToolName = useMemo(() => {
+    if (function_name === 'because_skills' && parsedArgs && typeof parsedArgs === 'object' && 'command' in parsedArgs) {
+      const command = parsedArgs.command as string;
+      return becauseSkillsCommandMap[command] || command;
+    }
+    return null;
+  }, [function_name, parsedArgs]);
+
   // 格式化参数
   const args = useMemo(() => {
     if (typeof toolCall.args === 'string') {
@@ -263,21 +296,24 @@ function SidePanelToolCallItem({
 
   // 获取标题文本
   const getTitle = () => {
+    // 如果是 because_skills 且有子工具名称，使用子工具名称
+    const displayName = subToolName || function_name;
+    
     if (isLoading) {
-      return function_name
-        ? localize('com_assistants_running_var', { 0: function_name })
+      return displayName
+        ? localize('com_assistants_running_var', { 0: displayName })
         : localize('com_assistants_running_action');
     }
     if (cancelled) {
       return localize('com_ui_cancelled');
     }
     if (isMCPToolCall) {
-      return localize('com_assistants_completed_function', { 0: function_name });
+      return localize('com_assistants_completed_function', { 0: displayName });
     }
     if (domain && domain.length !== Constants.ENCODED_DOMAIN_LENGTH) {
       return localize('com_assistants_completed_action', { 0: domain });
     }
-    return localize('com_assistants_completed_function', { 0: function_name });
+    return localize('com_assistants_completed_function', { 0: displayName });
   };
 
   // 是否有详情内容

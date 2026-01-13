@@ -11,6 +11,22 @@ export default function useAttachmentHandler(queryClient?: QueryClient) {
   return ({ data }: { data: TAttachment; submission: EventSubmission }) => {
     const { messageId } = data;
 
+    // 调试日志
+    console.log('[useAttachmentHandler] ========== Attachment Received ==========');
+    console.log('[useAttachmentHandler] MessageId:', messageId);
+    console.log('[useAttachmentHandler] Attachment Type:', data.type);
+    console.log('[useAttachmentHandler] ToolCallId:', data.toolCallId);
+    console.log('[useAttachmentHandler] Has _chartData:', !!data._chartData);
+    if (data._chartData) {
+      console.log('[useAttachmentHandler] _chartData:', data._chartData);
+    }
+    console.log('[useAttachmentHandler] Full Attachment:', data);
+    if (data.type === Tools.ui_resources) {
+      console.log('[useAttachmentHandler] UI Resources:', data[Tools.ui_resources]);
+      console.log('[useAttachmentHandler] UI Resources Count:', Array.isArray(data[Tools.ui_resources]) ? data[Tools.ui_resources].length : (data[Tools.ui_resources]?.data?.length ?? 0));
+    }
+    console.log('[useAttachmentHandler] =========================================');
+
     if (queryClient && data?.filepath && !data.filepath.includes('/api/files')) {
       queryClient.setQueryData([QueryKeys.files], (oldData: TAttachment[] | undefined) => {
         return [data, ...(oldData || [])];
@@ -32,10 +48,21 @@ export default function useAttachmentHandler(queryClient?: QueryClient) {
     setAttachmentsMap((prevMap) => {
       const messageAttachments =
         (prevMap as Record<string, TAttachment[] | undefined>)[messageId] || [];
-      return {
+      const updatedMap = {
         ...prevMap,
         [messageId]: [...messageAttachments, data],
       };
+      console.log('[useAttachmentHandler] Updated AttachmentsMap:', {
+        messageId,
+        attachmentsCount: updatedMap[messageId]?.length ?? 0,
+        hasChartData: !!data._chartData,
+        allMessageIds: Object.keys(updatedMap),
+      });
+
+      // 额外记录这个 messageId 的所有 attachments
+      console.log('[useAttachmentHandler] All attachments for messageId:', messageId, updatedMap[messageId]);
+
+      return updatedMap;
     });
   };
 }

@@ -24,6 +24,7 @@ const RerankerTool = require('./reranker-tool/scripts/RerankerTool');
 const SQLValidationTool = require('./sql-validation-tool/scripts/SQLValidationTool');
 const ResultAnalysisTool = require('./result-analysis-tool/scripts/ResultAnalysisTool');
 const SqlExecutorTool = require('./sql-executor-tool/scripts/SqlExecutorTool');
+const ChartGenerationTool = require('./chart-generation-tool/scripts/ChartGenerationTool');
 
 module.exports = {
   IntentClassificationTool,
@@ -33,5 +34,6 @@ module.exports = {
   SQLValidationTool,
   ResultAnalysisTool,
   SqlExecutorTool,
+  ChartGenerationTool,
 };
 

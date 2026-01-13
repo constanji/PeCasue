@@ -30,6 +30,7 @@ type PartProps = {
 
 const Part = memo(
   ({ part, isSubmitting, attachments, isLast, showCursor, isCreatedByUser }: PartProps) => {
+
     if (!part) {
       return null;
     }
@@ -78,7 +79,12 @@ const Part = memo(
       }
       return (
         <Container>
-          <Text text={text} isCreatedByUser={isCreatedByUser} showCursor={showCursor} />
+          <Text 
+            text={text} 
+            isCreatedByUser={isCreatedByUser} 
+            showCursor={showCursor} 
+            attachments={attachments}
+          />
         </Container>
       );
     } else if (part.type === ContentTypes.THINK) {
@@ -138,7 +144,9 @@ const Part = memo(
             output={toolCall.output ?? ''}
           />
         );
-      } else if (isToolCall) {
+      }
+
+      if (isToolCall) {
         return (
           <ToolCall
             args={toolCall.args ?? ''}
@@ -198,6 +206,7 @@ const Part = memo(
             args={toolCall.function.arguments as string}
             name={toolCall.function.name}
             output={toolCall.function.output}
+            attachments={attachments}
             isLast={isLast}
           />
         );

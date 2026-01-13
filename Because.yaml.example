@@ -7,33 +7,9 @@ mcpServers:
     chatMenu: true
     startup: false
     customUserVars: {}
-  搜索:
-    type: streamable-http
-    url: https://mcp.api-inference.modelscope.net/6423925509fd43/mcp
-    chatMenu: true
-    startup: true
-    customUserVars: {}
-  图片视频生成mcp:
-    type: streamable-http
-    url: https://mcp.api-inference.modelscope.net/b33cbea71ad446/mcp
-    chatMenu: true
-    startup: true
-    customUserVars: {}
-  图片视频生成sse:
-    type: sse
-    url: https://mcp.api-inference.modelscope.net/5a6e01d6c35e44/sse
-    chatMenu: true
-    startup: false
-    customUserVars: {}
-  易经八字:
-    type: streamable-http
-    url: https://mcp.api-inference.modelscope.net/30917074765441/mcp
-    chatMenu: true
-    startup: false
-    timeout: 120000
-    customUserVars: {}
+
 interface:
-  customWelcome: 欢迎来到 每日AI朋友圈！祝您体验愉快。
+  customWelcome: 欢迎来到 BeCause！祝您体验愉快。
   defaultEndpoint: deepseek
   defaultModel: deepseek-chat
   fileSearch: true

@@ -5,10 +5,11 @@ import { PermissionTypes, Permissions, apiBaseUrl } from '@because/data-provider
 import CodeBlock from '~/components/Messages/Content/CodeBlock';
 import useHasAccess from '~/hooks/Roles/useHasAccess';
 import { useFileDownload } from '~/data-provider';
-import { useCodeBlockContext } from '~/Providers';
+import { useCodeBlockContext, useMessageContext } from '~/Providers';
 import { handleDoubleClick } from '~/utils';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
+import { findChartDataFromAttachments, ChartRenderer } from './ChartRenderer';
 
 type TCodeProps = {
   inline?: boolean;
@@ -185,4 +186,17 @@ export const img: React.ElementType = memo(({ src, alt, title, className, style 
   }, [src, baseURL]);
 
   return <img src={fixedSrc} alt={alt} title={title} className={className} style={style} />;
+});
+
+export const chart: React.ElementType = memo((props: any) => {
+  const { className, 'data-chart-id': chartId, 'data-title': title, children, ...otherProps } = props;
+
+  // 对于chart-placeholder，我们现在直接在TOOL_CALL中处理ui_resources，不再通过chart组件
+  // 所以这里直接返回null，完全不显示占位符
+  if (className && className.includes('chart-placeholder')) {
+    return null;
+  }
+
+  // 对于非 chart-placeholder 的 div 元素，返回正常的 div
+  return React.createElement('div', { className, ...otherProps }, children);
 });

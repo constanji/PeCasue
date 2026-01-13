@@ -14,24 +14,40 @@ import { ArtifactProvider, CodeBlockProvider } from '~/Providers';
 import MarkdownErrorBoundary from './MarkdownErrorBoundary';
 import { langSubset, preprocessLaTeX } from '~/utils';
 import { unicodeCitation } from '~/components/Web';
-import { code, a, p, img } from './MarkdownComponents';
+import { code, a, p, img, chart } from './MarkdownComponents';
 import store from '~/store';
+import { preprocessChartMarkers, hasChartMarkers } from './ChartRenderer';
+import type { TAttachment } from '@because/data-provider';
 
 type TContentProps = {
   content: string;
   isLatestMessage: boolean;
+  attachments?: TAttachment[];
 };
 
-const Markdown = memo(({ content = '', isLatestMessage }: TContentProps) => {
+const Markdown = memo(({ content = '', isLatestMessage, attachments }: TContentProps) => {
   const LaTeXParsing = useRecoilValue<boolean>(store.LaTeXParsing);
   const isInitializing = content === '';
 
-  const currentContent = useMemo(() => {
+  const processedContent = useMemo(() => {
     if (isInitializing) {
       return '';
     }
-    return LaTeXParsing ? preprocessLaTeX(content) : content;
-  }, [content, LaTeXParsing, isInitializing]);
+
+    let processed = content;
+
+    // 处理 LaTeX
+    if (LaTeXParsing) {
+      processed = preprocessLaTeX(processed);
+    }
+
+    // 处理图表标记
+    if (attachments && attachments.length > 0 && hasChartMarkers(processed)) {
+      processed = preprocessChartMarkers(processed, attachments);
+    }
+
+    return processed;
+  }, [content, LaTeXParsing, isInitializing, attachments]);
 
   const rehypePlugins = useMemo(
     () => [
@@ -82,6 +98,7 @@ const Markdown = memo(({ content = '', isLatestMessage }: TContentProps) => {
                 a,
                 p,
                 img,
+                div: chart, // 将 chart 组件注册为 div 处理器
                 artifact: Artifact,
                 citation: Citation,
                 'highlighted-text': HighlightedText,
@@ -91,7 +108,7 @@ const Markdown = memo(({ content = '', isLatestMessage }: TContentProps) => {
               }
             }
           >
-            {currentContent}
+            {processedContent}
           </ReactMarkdown>
         </CodeBlockProvider>
       </ArtifactProvider>

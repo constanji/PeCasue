@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { ContentTypes } from '@because/data-provider';
+import { ContentTypes, Tools } from '@because/data-provider';
 import type {
   TMessageContentParts,
   SearchResultData,
@@ -12,6 +12,7 @@ import Sources from '~/components/Web/Sources';
 import { mapAttachments } from '~/utils/map';
 import { EditTextPart } from './Parts';
 import Part from './Part';
+import MessageUIResources from './MessageUIResources';
 
 type ContentPartsProps = {
   content: Array<TMessageContentParts | undefined> | undefined;
@@ -48,6 +49,8 @@ const ContentParts = memo(
     siblingIdx,
     setSiblingIdx,
   }: ContentPartsProps) => {
+
+
     const attachmentMap = useMemo(() => mapAttachments(attachments ?? []), [attachments]);
 
     const effectiveIsSubmitting = isLatestMessage ? isSubmitting : false;
@@ -125,10 +128,13 @@ const ContentParts = memo(
           return isBeforeFirstTool || isFinalSummary;
         }
 
-        // 所有 TOOL_CALL（工具调用）都不在 chat 主视图中展示，只在思维链侧边栏展示
+        // TOOL_CALL 仍然只在思维链侧边栏展示，不在主视图中展示
         if (part.type === ContentTypes.TOOL_CALL) {
           return false;
         }
+
+        // 其他类型的 part 保持不变
+        return true;
 
         // 其他类型（IMAGE_FILE 等）保持不变
         return true;
@@ -175,6 +181,18 @@ const ContentParts = memo(
       );
     }
 
+    // 收集所有在 TEXT parts 中已经渲染的 tool_call_ids
+    // 这些 attachments 不应该在消息末尾再次渲染
+    const renderedToolCallIds = useMemo(() => {
+      const ids = new Set<string>();
+      filteredContent.forEach((part) => {
+        if (part && part.type === ContentTypes.TEXT && part.tool_call_ids) {
+          part.tool_call_ids.forEach((id) => ids.add(id));
+        }
+      });
+      return ids;
+    }, [filteredContent]);
+
     return (
       <>
         <SearchContext.Provider value={{ searchResults }}>
@@ -188,6 +206,30 @@ const ContentParts = memo(
             const toolCallId =
               (part?.[ContentTypes.TOOL_CALL] as Agents.ToolCall | undefined)?.id ?? '';
             const partAttachments = attachmentMap[toolCallId];
+
+            // 对于文本部分，只使用明确关联的 tool_call_ids 的 attachments
+            let textAttachments = partAttachments;
+            if (part.type === ContentTypes.TEXT) {
+              if (!textAttachments || textAttachments.length === 0) {
+                // 检查文本部分是否有关联的工具调用ID
+                if (part.tool_call_ids && part.tool_call_ids.length > 0) {
+                  // 收集所有 tool_call_ids 对应的 attachments
+                  const allTextAttachments: TAttachment[] = [];
+                  part.tool_call_ids.forEach((id) => {
+                    const atts = attachmentMap[id];
+                    if (atts && atts.length > 0) {
+                      allTextAttachments.push(...atts);
+                    }
+                  });
+                  if (allTextAttachments.length > 0) {
+                    textAttachments = allTextAttachments;
+                  }
+                }
+                // 移除了 fallback：不再在 TEXT part 中使用所有 attachments
+                // 所有未关联的 ui_resources 将在消息末尾统一渲染
+              }
+            }
+
 
             return (
               <MessageContext.Provider
@@ -204,7 +246,7 @@ const ContentParts = memo(
               >
                 <Part
                   part={part}
-                  attachments={partAttachments}
+                  attachments={textAttachments || partAttachments}
                   isSubmitting={effectiveIsSubmitting}
                   key={`part-${messageId}-${idx}`}
                   isCreatedByUser={isCreatedByUser}
@@ -214,6 +256,13 @@ const ContentParts = memo(
               </MessageContext.Provider>
             );
           })}
+          {/* 在消息末尾统一渲染所有未关联的 ui_resources */}
+          {!isCreatedByUser && (
+            <MessageUIResources 
+              attachments={attachments} 
+              excludedToolCallIds={renderedToolCallIds}
+            />
+          )}
         </SearchContext.Provider>
       </>
     );

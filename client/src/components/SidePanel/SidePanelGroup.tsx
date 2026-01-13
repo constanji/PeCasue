@@ -166,10 +166,10 @@ const SidePanelGroup = memo(
             </>
           )}
 
-          {/* 思考链面板 - 显示在右侧（去掉拖动，只保留开关按钮） */}
+          {/* 思考链面板 - 显示在右侧（支持拖动调整宽度） */}
           {!isSmallScreen && (
             <>
-              {/* 跟随思维链左侧的打开/关闭按钮（模仿原右侧边栏 NavToggle 行为） */}
+              {/* 开关按钮 - 始终可见 */}
               <div
                 onMouseEnter={() => setIsThoughtChainHovering(true)}
                 onMouseLeave={() => setIsThoughtChainHovering(false)}
@@ -180,11 +180,22 @@ const SidePanelGroup = memo(
                   isHovering={isThoughtChainHovering}
                   onToggle={toggleThoughtChainVisible}
                   setIsHovering={setIsThoughtChainHovering}
-                  className="fixed top-1/2 mr-2"
+                  className={cn(
+                    'fixed top-1/2',
+                    thoughtChainCollapsed ? 'mr-9' : 'mr-16',
+                  )}
                   translateX={false}
                   side="right"
                 />
               </div>
+              {/* 拖动条 - 始终存在，但只在面板展开时可见和可交互 */}
+              <ResizableHandleAlt
+                withHandle={!thoughtChainCollapsed}
+                className={cn(
+                  'bg-border-medium text-text-primary',
+                  thoughtChainCollapsed && 'opacity-0 pointer-events-none',
+                )}
+              />
               <ResizablePanel
                 ref={thoughtChainPanelRef}
                 defaultSize={currentLayout[currentLayout.length - 1]}

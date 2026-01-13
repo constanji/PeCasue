@@ -63,7 +63,7 @@ export default function AssetCenterManager() {
               <div className="mb-4 px-4 pt-4">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h1 className="text-2xl font-semibold text-text-primary">资产中心</h1>
+                    <h1 className="text-2xl font-semibold text-text-primary">项目管理</h1>
                     <p className="mt-1 text-sm text-text-secondary">
                       管理数据源和知识库
                     </p>

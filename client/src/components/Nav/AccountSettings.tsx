@@ -107,7 +107,7 @@ function AccountSettings() {
               className="select-item text-sm"
             >
               <Database className="icon-md" aria-hidden="true" />
-              资产中心
+              项目管理
             </Select.SelectItem>
           </>
         )}

@@ -146,12 +146,80 @@ export class ToolNode<T = any> extends RunnableCallable<T, T> {
       ) {
         return output;
       } else {
-        return new ToolMessage({
+        // 检查 output 是否是包含 artifact 的对象
+        let content: string;
+        let artifact: any = undefined;
+        
+        if (output && typeof output === 'object' && !Array.isArray(output)) {
+          if ('artifact' in output) {
+            artifact = output.artifact;
+            content = typeof output.content === 'string' ? output.content : JSON.stringify(output.content || output);
+
+            // 如果输出或artifact中还有 _chartData，将其合并到 artifact 中
+            if (('_chartData' in output && output._chartData) ||
+                (artifact && '_chartData' in artifact && artifact._chartData)) {
+              artifact = artifact || {};
+              const chartData = output._chartData || artifact._chartData;
+              artifact._chartData = chartData;
+              console.log('[ToolNode] Merged _chartData into artifact:', {
+                chartId: chartData.chartId,
+                title: chartData.title,
+                hasData: !!chartData.data,
+                hasLayout: !!chartData.layout
+              });
+            }
+
+            // 调试日志：检查 artifact 内容
+            if (artifact && typeof artifact === 'object') {
+              // 使用 console.log 输出到服务器日志（Node.js 环境）
+              console.log('[ToolNode] Artifact detected:', {
+                keys: Object.keys(artifact),
+                hasUiResources: !!(artifact as any).ui_resources,
+                hasMemory: !!(artifact as any).memory,
+                hasChartData: !!(artifact as any)._chartData,
+                toolName: tool.name,
+                toolCallId: call.id,
+              });
+            }
+          } else if ('content' in output) {
+            content = typeof output.content === 'string' ? output.content : JSON.stringify(output.content);
+          } else {
+            content = JSON.stringify(output);
+          }
+        } else {
+          content = typeof output === 'string' ? output : JSON.stringify(output);
+        }
+        
+        const toolMessage = new ToolMessage({
           status: 'success',
           name: tool.name,
-          content: typeof output === 'string' ? output : JSON.stringify(output),
+          content,
           tool_call_id: call.id!,
+          ...(artifact && { artifact }),
         });
+        
+        // 调试日志：确认 ToolMessage 的 artifact（输出到服务器日志）
+        const logger = require('@because/data-schemas').logger;
+        if (artifact) {
+          logger.info('[ToolNode] ========== Created ToolMessage with artifact ==========', {
+            toolName: tool.name,
+            toolCallId: call.id,
+            hasArtifact: !!(toolMessage as any).artifact,
+            artifactKeys: (toolMessage as any).artifact ? Object.keys((toolMessage as any).artifact) : [],
+            uiResourcesKeys: (toolMessage as any).artifact?.ui_resources ? Object.keys((toolMessage as any).artifact.ui_resources) : null,
+            hasUiResourcesData: !!(toolMessage as any).artifact?.ui_resources?.data,
+            uiResourcesDataLength: (toolMessage as any).artifact?.ui_resources?.data?.length || 0,
+          });
+        } else {
+          logger.info('[ToolNode] ========== No artifact in tool output ==========', {
+            toolName: tool.name,
+            toolCallId: call.id,
+            outputType: typeof output,
+            hasOutput: !!output,
+          });
+        }
+        
+        return toolMessage;
       }
     } catch (_e: unknown) {
       const e = _e as Error;

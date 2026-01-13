@@ -463,6 +463,14 @@ export default function useEventHandlers({
             messageId: responseMessage.messageId,
           };
 
+          // 调试日志
+          console.log('[useEventHandlers] Processing attachment:', {
+            type: attachment.type,
+            toolCallId: attachment.toolCallId,
+            messageId: attachment.messageId,
+            hasUiResources: !!(attachment.ui_resources),
+          });
+
           attachmentHandler({
             data: attachmentData,
             submission: submission as EventSubmission,

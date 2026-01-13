@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { Button } from '@because/client';
 import { TriangleAlert } from 'lucide-react';
-import { actionDelimiter, actionDomainSeparator, Constants } from '@because/data-provider';
+import { actionDelimiter, actionDomainSeparator, Constants, Tools } from '@because/data-provider';
 import type { TAttachment } from '@because/data-provider';
 import { useLocalize, useProgress } from '~/hooks';
 import { AttachmentGroup } from './Parts';
@@ -29,6 +29,14 @@ export default function ToolCall({
   auth?: string;
   expires_at?: number;
 }) {
+  // 调试日志
+  console.log('[ToolCall] ========== ToolCall Rendered ==========');
+  console.log('[ToolCall] Name:', name);
+  console.log('[ToolCall] Args:', _args);
+  console.log('[ToolCall] Output:', output);
+  console.log('[ToolCall] Attachments:', attachments);
+  console.log('[ToolCall] Attachments count:', attachments?.length ?? 0);
+
   const localize = useLocalize();
   const [showInfo, setShowInfo] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -77,8 +85,25 @@ export default function ToolCall({
   }, [_args]) as string | undefined;
 
   const hasInfo = useMemo(
-    () => (args?.length ?? 0) > 0 || (output?.length ?? 0) > 0,
-    [args, output],
+    () => {
+      const hasArgs = (args?.length ?? 0) > 0;
+      const hasOutput = (output?.length ?? 0) > 0;
+      const hasUiResources = attachments?.some(
+        (att) => {
+          if (att.type === Tools.ui_resources) {
+            const uiResourceData = att[Tools.ui_resources];
+            if (Array.isArray(uiResourceData)) {
+              return uiResourceData.length > 0;
+            } else if (uiResourceData && uiResourceData.data && Array.isArray(uiResourceData.data)) {
+              return uiResourceData.data.length > 0;
+            }
+          }
+          return false;
+        },
+      ) ?? false;
+      return hasArgs || hasOutput || hasUiResources;
+    },
+    [args, output, attachments],
   );
 
   const authDomain = useMemo(() => {
