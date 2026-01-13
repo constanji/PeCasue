@@ -55,41 +55,73 @@ class SemanticDescriptor {
  */
 class EntityDescriptor extends SemanticDescriptor {
   generateDescription(model, context) {
-    const { primaryKey, dimensions, measures } = context;
+    const { primaryKey, dimensions, measures, identifiableFields } = context;
     const modelName = model.name || model.model || '实体';
+    const tableName = model.model || model.table || modelName;
     
-    let desc = '这是一个"实体"的抽象\n\n';
+    let desc = `\`${tableName}\` 表是一个**实体表**，用于存储业务中的核心实体对象。\n\n`;
     
-    // 根据实体的维度推断实体类型
-    if (dimensions.some(d => d.includes('name') || d.includes('title'))) {
-      desc += '一个实体是谁？它有哪些基本属性？';
+    // 根据字段推断实体类型
+    const hasNameField = identifiableFields.some(f => f.includes('name') || f.includes('title'));
+    const hasContactField = identifiableFields.some(f => f.includes('phone') || f.includes('email'));
+    
+    if (hasNameField && hasContactField) {
+      desc += '该表通常存储**客户、用户或联系人**等人员信息，包含姓名、联系方式等基本属性。';
+    } else if (hasNameField) {
+      desc += '该表存储实体的基本信息，包含名称、标识等属性。';
     } else {
-      desc += `这是"${modelName}"实体，包含实体的基本信息和属性`;
+      desc += `该表存储"${modelName}"相关的实体信息。`;
+    }
+    
+    if (primaryKey) {
+      desc += `每个实体通过 \`${primaryKey}\` 字段唯一标识。`;
+    }
+    
+    if (dimensions.length > 0) {
+      desc += `\n\n可以通过 ${dimensions.slice(0, 2).join('、')} 等维度字段进行分组和筛选。`;
     }
     
     return desc;
   }
 
   generateBusinessQuestions(model, context) {
-    const { dimensions, measures } = context;
+    const { dimensions, measures, identifiableFields } = context;
     const questions = [];
+    const modelName = model.name || model.model || '实体';
+    
+    // 基于字段生成问题
+    if (identifiableFields.some(f => f.includes('name'))) {
+      questions.push(`查询${modelName}的基本信息`);
+      questions.push(`按名称搜索${modelName}`);
+    }
     
     if (dimensions.length > 0) {
-      questions.push(`按${dimensions[0]}分析的数据分布如何？`);
-    }
-    if (measures.length > 0) {
-      questions.push(`实体的${measures[0]}统计情况如何？`);
+      questions.push(`按${dimensions[0]}统计${modelName}的数量分布`);
     }
     
-    return questions;
+    if (measures.length > 0) {
+      questions.push(`统计${modelName}的${measures[0]}情况`);
+    } else {
+      questions.push(`统计${modelName}的总数`);
+    }
+    
+    return questions.length > 0 ? questions : [`查询${modelName}信息`];
   }
 
   generateKeyPoints(model, context) {
-    const { primaryKey } = context;
+    const { primaryKey, dimensions, identifiableFields } = context;
     const points = [];
     
     if (primaryKey) {
-      points.push(`${primaryKey} 是唯一标识`);
+      points.push(`\`${primaryKey}\` 是主键，唯一标识每条记录`);
+    }
+    
+    if (identifiableFields.length > 0) {
+      points.push(`可通过 ${identifiableFields.slice(0, 2).join('、')} 等字段直接识别实体`);
+    }
+    
+    if (dimensions.length > 0) {
+      points.push(`支持按 ${dimensions.slice(0, 2).join('、')} 等维度进行分组分析`);
     }
     
     return points;
@@ -102,16 +134,32 @@ class EntityDescriptor extends SemanticDescriptor {
  */
 class FactDescriptor extends SemanticDescriptor {
   generateDescription(model, context) {
-    const { measures, dimensions } = context;
+    const { measures, dimensions, primaryKey } = context;
     const modelName = model.name || model.model || '事实表';
+    const tableName = model.model || model.table || modelName;
     
-    let desc = '这是一次"交易事件"或"业务事实"\n\n';
+    let desc = `\`${tableName}\` 表是一个**事实表**，记录业务中发生的交易、订单等可聚合的业务事实。\n\n`;
     
-    if (measures.some(m => m.includes('amount') || m.includes('price'))) {
-      desc += '包含可汇总的金额、数量等度量值\n\n';
-      desc += '这是业务分析的核心事实表，可用于计算GMV、销量等关键指标';
+    const hasAmount = measures.some(m => m.includes('amount') || m.includes('total') || m.includes('price'));
+    const hasQuantity = measures.some(m => m.includes('quantity') || m.includes('count') || m.includes('num'));
+    
+    if (hasAmount && hasQuantity) {
+      desc += '该表包含**金额、数量**等可汇总的度量值，是业务分析的核心数据源。';
+      desc += '可用于计算GMV（总交易额）、销量、订单数等关键业务指标。';
+    } else if (hasAmount) {
+      desc += '该表包含**金额**等可汇总的度量值，用于财务和交易分析。';
+    } else if (hasQuantity) {
+      desc += '该表包含**数量**等可汇总的度量值，用于统计和分析。';
     } else {
-      desc += `这是"${modelName}"事实表，记录业务发生的事实`;
+      desc += `该表记录"${modelName}"相关的业务事实。`;
+    }
+    
+    if (primaryKey) {
+      desc += `\n\n每条记录通过 \`${primaryKey}\` 唯一标识。`;
+    }
+    
+    if (dimensions.length > 0) {
+      desc += `可以通过 ${dimensions.slice(0, 2).join('、')} 等维度字段进行分组聚合分析。`;
     }
     
     return desc;
@@ -120,18 +168,26 @@ class FactDescriptor extends SemanticDescriptor {
   generateBusinessQuestions(model, context) {
     const { measures, dimensions } = context;
     const questions = [];
+    const modelName = model.name || model.model || '事实表';
     
-    if (measures.some(m => m.includes('amount') || m.includes('total'))) {
-      questions.push('总金额、总数量统计');
+    const hasAmount = measures.some(m => m.includes('amount') || m.includes('total') || m.includes('price'));
+    const hasQuantity = measures.some(m => m.includes('quantity') || m.includes('count'));
+    
+    if (hasAmount) {
+      questions.push(`统计${modelName}的总金额`);
+      questions.push(`按时间维度分析${modelName}的金额趋势`);
     }
-    if (measures.some(m => m.includes('price') || m.includes('cost'))) {
-      questions.push('价格、成本分析');
+    
+    if (hasQuantity) {
+      questions.push(`统计${modelName}的总数量`);
+      questions.push(`按维度分析${modelName}的数量分布`);
     }
+    
     if (dimensions.length > 0) {
-      questions.push(`按${dimensions[0]}维度的数据分布`);
+      questions.push(`按${dimensions[0]}维度统计${modelName}的汇总数据`);
     }
     
-    return questions;
+    return questions.length > 0 ? questions : [`查询${modelName}的统计信息`];
   }
 
   generateKeyPoints(model, context) {
@@ -139,17 +195,21 @@ class FactDescriptor extends SemanticDescriptor {
     const points = [];
     
     if (primaryKey) {
-      points.push(`${primaryKey} 是唯一标识`);
+      points.push(`\`${primaryKey}\` 是主键，唯一标识每条交易/事实记录`);
+    }
+    
+    if (measures.length > 0) {
+      points.push(`\`${measures.slice(0, 2).join('`、`')}\` 等字段是可聚合的度量值，支持 SUM、AVG、COUNT 等聚合函数`);
+    }
+    
+    if (dimensions.length > 0) {
+      points.push(`支持按 \`${dimensions.slice(0, 2).join('`、`')}\` 等维度字段进行 GROUP BY 分组分析`);
     }
     
     // 检查是否有既是维度又是度量的字段
     const dualFields = dimensions.filter(d => measures.includes(d));
     if (dualFields.length > 0) {
-      points.push(`${dualFields[0]} 既是属性（维度）又是可统计指标（measure）`);
-    }
-    
-    if (measures.some(m => m.includes('quantity') || m.includes('count'))) {
-      points.push('数量、金额等字段都是可汇总的数值');
+      points.push(`\`${dualFields[0]}\` 既可以作为维度（分组），也可以作为度量（聚合）`);
     }
     
     return points;
@@ -162,16 +222,33 @@ class FactDescriptor extends SemanticDescriptor {
  */
 class SnapshotDescriptor extends SemanticDescriptor {
   generateDescription(model, context) {
-    const { dimensions, measures } = context;
+    const { dimensions, measures, primaryKey } = context;
     const modelName = model.name || model.model || '快照表';
+    const tableName = model.model || model.table || modelName;
     
-    let desc = '这是"当前状态"的快照模型\n\n';
-    desc += '快照不是交易，而是某个时间点的状态记录\n\n';
+    let desc = `\`${tableName}\` 表是一个**快照表**，记录某个时间点的状态信息，而非交易事件。\n\n`;
     
-    if (measures.some(m => m.includes('quantity') || m.includes('stock'))) {
-      desc += '可直接回答的问题：哪些商品库存不足？最近多久补过货？库存总量趋势如何？';
+    const hasStock = measures.some(m => m.includes('quantity') || m.includes('stock') || m.includes('inventory'));
+    const hasBalance = measures.some(m => m.includes('balance') || m.includes('amount'));
+    const hasStatus = dimensions.some(d => d.includes('status') || d.includes('state'));
+    
+    if (hasStock) {
+      desc += '该表通常用于记录**库存、余额**等状态信息。';
+      desc += '与事实表不同，快照表记录的是"当前状态"而非"发生的事件"。';
+    } else if (hasBalance) {
+      desc += '该表记录**余额、账户**等状态信息。';
+    } else if (hasStatus) {
+      desc += '该表记录实体的**状态信息**。';
     } else {
-      desc += `这是"${modelName}"状态快照，记录实体的当前状态`;
+      desc += `该表记录"${modelName}"相关的状态快照。`;
+    }
+    
+    if (primaryKey) {
+      desc += `\n\n每条记录通过 \`${primaryKey}\` 唯一标识。`;
+    }
+    
+    if (dimensions.some(d => d.includes('time') || d.includes('date'))) {
+      desc += '可以通过时间维度分析状态的变化趋势。';
     }
     
     return desc;
@@ -180,14 +257,25 @@ class SnapshotDescriptor extends SemanticDescriptor {
   generateBusinessQuestions(model, context) {
     const { measures, dimensions } = context;
     const questions = [];
+    const modelName = model.name || model.model || '快照表';
     
-    if (measures.some(m => m.includes('quantity') || m.includes('stock'))) {
-      questions.push('哪些商品库存不足？');
-      questions.push('最近多久补过货？');
-      questions.push('库存总量趋势如何？');
+    const hasStock = measures.some(m => m.includes('quantity') || m.includes('stock') || m.includes('inventory'));
+    const hasBalance = measures.some(m => m.includes('balance'));
+    
+    if (hasStock) {
+      questions.push(`查询${modelName}中库存不足的记录`);
+      questions.push(`统计${modelName}的库存总量`);
+      questions.push(`分析${modelName}的库存变化趋势`);
+    } else if (hasBalance) {
+      questions.push(`查询${modelName}的余额情况`);
+      questions.push(`统计${modelName}的余额分布`);
     } else {
-      questions.push('当前状态分布如何？');
-      questions.push('状态变化趋势如何？');
+      questions.push(`查询${modelName}的当前状态分布`);
+      questions.push(`分析${modelName}的状态变化趋势`);
+    }
+    
+    if (dimensions.some(d => d.includes('time') || d.includes('date'))) {
+      questions.push(`按时间维度分析${modelName}的状态变化`);
     }
     
     return questions;
@@ -198,16 +286,22 @@ class SnapshotDescriptor extends SemanticDescriptor {
     const points = [];
     
     if (primaryKey) {
-      points.push(`${primaryKey} 是唯一标识`);
+      points.push(`\`${primaryKey}\` 是主键，唯一标识每条快照记录`);
     }
     
     // 快照表的特点：状态字段可能既是维度又是度量
     const stateFields = measures.filter(m => 
-      m.includes('quantity') || m.includes('stock') || m.includes('balance')
+      m.includes('quantity') || m.includes('stock') || m.includes('balance') || m.includes('inventory')
     );
     if (stateFields.length > 0) {
-      points.push(`${stateFields[0]} 既是维度又是度量，这在 BI / LLM 场景是完全合理的（状态 & 汇总）`);
+      points.push(`\`${stateFields[0]}\` 等状态字段既可以作为维度（筛选），也可以作为度量（汇总统计）`);
     }
+    
+    if (dimensions.some(d => d.includes('time') || d.includes('date'))) {
+      points.push('支持按时间维度分析状态的变化趋势');
+    }
+    
+    points.push('快照表与事实表的区别：快照记录"当前状态"，事实表记录"发生的事件"');
     
     return points;
   }
@@ -219,17 +313,29 @@ class SnapshotDescriptor extends SemanticDescriptor {
  */
 class EventDescriptor extends SemanticDescriptor {
   generateDescription(model, context) {
-    const { dimensions } = context;
+    const { dimensions, primaryKey } = context;
     const modelName = model.name || model.model || '事件表';
+    const tableName = model.model || model.table || modelName;
     
-    let desc = '这是"事件"或"行为"的记录\n\n';
+    let desc = `\`${tableName}\` 表是一个**事件表**，记录业务中发生的行为、操作、日志等事件流。\n\n`;
     
-    if (dimensions.some(d => d.includes('type') || d.includes('action'))) {
-      desc += '记录了事件类型、发生时间、相关对象等信息\n\n';
-      desc += '这是分析转化、用户行为路径的关键数据源';
+    const hasEventType = dimensions.some(d => d.includes('type') || d.includes('action') || d.includes('event'));
+    const hasTime = dimensions.some(d => d.includes('time') || d.includes('date'));
+    
+    if (hasEventType && hasTime) {
+      desc += '该表记录了**事件类型、发生时间、相关对象**等关键信息。';
+      desc += '是分析用户行为路径、转化漏斗、推荐系统等场景的核心数据源。';
+    } else if (hasEventType) {
+      desc += '该表记录不同类型的事件信息，用于行为分析和统计。';
     } else {
-      desc += `这是"${modelName}"事件表，记录业务事件的发生`;
+      desc += `该表记录"${modelName}"相关的业务事件。`;
     }
+    
+    if (primaryKey) {
+      desc += `\n\n每条事件通过 \`${primaryKey}\` 唯一标识。`;
+    }
+    
+    desc += '与事实表不同，事件表通常记录的是不可聚合的离散事件。';
     
     return desc;
   }
@@ -237,13 +343,22 @@ class EventDescriptor extends SemanticDescriptor {
   generateBusinessQuestions(model, context) {
     const { dimensions } = context;
     const questions = [];
+    const modelName = model.name || model.model || '事件表';
     
-    questions.push('转化漏斗分析');
-    questions.push('用户行为路径');
+    const hasEventType = dimensions.some(d => d.includes('type') || d.includes('action'));
+    const hasTime = dimensions.some(d => d.includes('time') || d.includes('date'));
     
-    if (dimensions.some(d => d.includes('type'))) {
-      questions.push('事件类型分布');
+    if (hasEventType) {
+      questions.push(`统计${modelName}中不同事件类型的分布`);
+      questions.push(`分析${modelName}的事件发生趋势`);
     }
+    
+    if (hasTime) {
+      questions.push(`按时间维度分析${modelName}的事件发生情况`);
+    }
+    
+    questions.push(`查询${modelName}中的特定事件记录`);
+    questions.push(`分析${modelName}的事件转化路径`);
     
     return questions;
   }
@@ -253,11 +368,22 @@ class EventDescriptor extends SemanticDescriptor {
     const points = [];
     
     if (primaryKey) {
-      points.push(`${primaryKey} 是唯一标识`);
+      points.push(`\`${primaryKey}\` 是主键，唯一标识每条事件记录`);
     }
     
-    points.push('行为类型、行为时间、行为对象（人 + 商品）');
-    points.push('这是漏斗 / 推荐 / 画像的输入层');
+    const eventTypeField = dimensions.find(d => d.includes('type') || d.includes('action'));
+    const timeField = dimensions.find(d => d.includes('time') || d.includes('date'));
+    
+    if (eventTypeField) {
+      points.push(`\`${eventTypeField}\` 字段标识事件类型，可用于事件分类和统计`);
+    }
+    
+    if (timeField) {
+      points.push(`\`${timeField}\` 字段记录事件发生时间，支持时间序列分析`);
+    }
+    
+    points.push('事件表通常用于分析用户行为路径、转化漏斗、推荐系统等场景');
+    points.push('与事实表的区别：事件表记录离散事件，通常不进行金额/数量的聚合计算');
     
     return points;
   }
@@ -287,7 +413,7 @@ function extractModelContext(model) {
 
   // 提取主键
   const primaryEntity = entities.find(e => e.type === 'primary');
-  const primaryKey = primaryEntity 
+  let primaryKey = primaryEntity 
     ? (primaryEntity.expr || primaryEntity.name)
     : null;
 
@@ -399,7 +525,7 @@ function inferSemanticRole(model, context) {
 
 /**
  * 生成语义模型说明文本
- * 基于语义角色注册表 + 策略模式，而非 if-else 猜测
+ * 基于语义角色注册表 + 策略模式，生成结构化的语义模型说明
  * @param {Object} params
  * @param {string} params.databaseName - 数据库名称
  * @param {Array} params.semanticModels - 语义模型数组
@@ -411,22 +537,19 @@ function generateSemanticModelDescription({ databaseName, semanticModels }) {
   }
 
   let description = '';
-  const emojiMap = {
-    1: '1️⃣',
-    2: '2️⃣',
-    3: '3️⃣',
-    4: '4️⃣',
-    5: '5️⃣',
-    6: '6️⃣',
-    7: '7️⃣',
-    8: '8️⃣',
-    9: '9️⃣',
-  };
+  
+  // 添加数据库级别的说明
+  if (databaseName) {
+    description += `# 数据库：${databaseName}\n\n`;
+    description += `本数据库包含 ${semanticModels.length} 个语义模型，用于业务数据分析和查询。\n\n`;
+    description += '---\n\n';
+  }
 
   // 生成每个表的说明
   semanticModels.forEach((model, index) => {
-    const emoji = emojiMap[index + 1] || `${index + 1}.`;
+    const modelNumber = index + 1;
     const modelName = model.name || model.model || '未知表';
+    const tableName = model.model || model.table || modelName;
     
     // 提取模型上下文
     const context = extractModelContext(model);
@@ -440,7 +563,11 @@ function generateSemanticModelDescription({ databaseName, semanticModels }) {
       // 如果角色不存在，使用默认实体描述符
       const descriptor = new EntityDescriptor();
       const modelDesc = model.description || descriptor.generateDescription(model, context);
-      description += `${emoji} ${modelName}\n\n${modelDesc}\n\n---\n\n`;
+      description += `## ${modelNumber}. ${modelName}\n\n`;
+      description += `**表名**: \`${tableName}\`\n\n`;
+      description += `**语义角色**: 实体 (entity)\n\n`;
+      description += `**说明**:\n\n${modelDesc}\n\n`;
+      description += '---\n\n';
       return;
     }
     
@@ -453,52 +580,76 @@ function generateSemanticModelDescription({ databaseName, semanticModels }) {
       modelDesc = descriptor.generateDescription(model, context);
     }
     
-    description += `${emoji} ${modelName}\n\n`;
-    description += `${modelDesc}\n\n`;
+    // 生成表头
+    description += `## ${modelNumber}. ${modelName}\n\n`;
+    description += `**表名**: \`${tableName}\`\n\n`;
+    description += `**语义角色**: ${getSemanticRoleLabel(semanticRole)}\n\n`;
+    
+    // 生成模型说明
+    description += `### 说明\n\n${modelDesc}\n\n`;
 
-    // 生成核心语义
+    // 生成核心语义信息
+    const semanticInfo = [];
+    
+    // 主键信息
     if (context.primaryKey) {
-      description += `核心语义：\n`;
-      // 提取主键显示名称
       let keyDisplayName = context.primaryKey;
       if (context.primaryKey.endsWith('_id')) {
         keyDisplayName = context.primaryKey.replace(/_id$/, '');
       }
-      description += `${keyDisplayName}唯一标识：${context.primaryKey}\n\n`;
+      semanticInfo.push(`- **唯一标识**: \`${context.primaryKey}\` (${keyDisplayName})`);
+    }
+    
+    // 外键关联信息
+    if (context.foreignKeys.length > 0) {
+      context.foreignKeys.slice(0, 3).forEach(fk => {
+        semanticInfo.push(`- **关联字段**: \`${fk}\``);
+      });
+    }
+    
+    if (semanticInfo.length > 0) {
+      description += `### 核心语义\n\n${semanticInfo.join('\n')}\n\n`;
     }
 
     // 可识别属性
     if (context.identifiableFields.length > 0) {
-      const entityType = modelDesc.includes('人') ? '人' : modelDesc.includes('商品') ? '商品' : '实体';
-      description += `可直接识别${entityType}的属性：\n`;
+      const entityType = inferEntityType(modelDesc, context);
+      description += `### 可识别属性\n\n`;
+      description += `可用于直接识别${entityType}的属性：\n\n`;
       context.identifiableFields.slice(0, 5).forEach(field => {
-        description += `${field}\n`;
+        description += `- \`${field}\`\n`;
       });
+      description += '\n';
     }
 
-    // 可分析属性
-    const analysisFields = [];
-    context.dimensions.slice(0, 3).forEach(field => {
-      analysisFields.push(`${field}（维度）`);
-    });
-    context.measures.slice(0, 3).forEach(field => {
-      analysisFields.push(`${field}（度量）`);
-    });
-    
-    if (analysisFields.length > 0) {
-      description += `\n可分析属性：\n`;
-      analysisFields.forEach(field => {
-        description += `${field}\n`;
+    // 维度信息
+    if (context.dimensions.length > 0) {
+      description += `### 维度字段\n\n`;
+      description += `可用于分组、筛选的维度：\n\n`;
+      context.dimensions.slice(0, 5).forEach(field => {
+        description += `- \`${field}\`\n`;
       });
+      description += '\n';
+    }
+
+    // 度量信息
+    if (context.measures.length > 0) {
+      description += `### 度量字段\n\n`;
+      description += `可用于聚合计算的度量：\n\n`;
+      context.measures.slice(0, 5).forEach(field => {
+        description += `- \`${field}\`\n`;
+      });
+      description += '\n';
     }
 
     // 业务问题示例
     const businessQuestions = descriptor.generateBusinessQuestions(model, context);
     if (businessQuestions.length > 0) {
-      description += `\n业务能问的问题：\n`;
-      businessQuestions.forEach(q => {
-        description += `${q}\n`;
+      description += `### 典型业务问题\n\n`;
+      businessQuestions.forEach((q, idx) => {
+        description += `${idx + 1}. ${q}\n`;
       });
+      description += '\n';
     }
 
     // 关键点
@@ -508,22 +659,58 @@ function generateSemanticModelDescription({ databaseName, semanticModels }) {
     const descriptorKeyPoints = descriptor.generateKeyPoints(model, context);
     keyPoints.push(...descriptorKeyPoints);
     
-    // 添加外键关联信息
-    if (context.foreignKeys.length > 0) {
-      keyPoints.push(`${context.foreignKeys[0]} 是关联字段`);
+    // 添加语义角色特定的关键点
+    if (semanticRole === SemanticRole.FACT && context.measures.length > 0) {
+      keyPoints.push(`支持按维度聚合计算 ${context.measures.slice(0, 2).join('、')} 等度量值`);
     }
     
     if (keyPoints.length > 0) {
-      description += `\n关键点（语义正确）：\n`;
-      keyPoints.forEach(point => {
-        description += `${point}\n`;
+      description += `### 关键语义点\n\n`;
+      keyPoints.forEach((point, idx) => {
+        description += `${idx + 1}. ${point}\n`;
       });
+      description += '\n';
     }
 
-    description += '\n---\n\n';
+    description += '---\n\n';
   });
 
   return description;
+}
+
+/**
+ * 获取语义角色的中文标签
+ * @param {string} semanticRole - 语义角色
+ * @returns {string} 中文标签
+ */
+function getSemanticRoleLabel(semanticRole) {
+  const labels = {
+    [SemanticRole.ENTITY]: '实体 (entity)',
+    [SemanticRole.FACT]: '事实表 (fact)',
+    [SemanticRole.SNAPSHOT]: '快照 (snapshot)',
+    [SemanticRole.EVENT]: '事件 (event)',
+  };
+  return labels[semanticRole] || semanticRole;
+}
+
+/**
+ * 推断实体类型
+ * @param {string} modelDesc - 模型描述
+ * @param {Object} context - 上下文信息
+ * @returns {string} 实体类型
+ */
+function inferEntityType(modelDesc, context) {
+  const desc = modelDesc.toLowerCase();
+  if (desc.includes('客户') || desc.includes('用户') || desc.includes('人')) {
+    return '客户/用户';
+  }
+  if (desc.includes('商品') || desc.includes('产品') || desc.includes('物品')) {
+    return '商品/产品';
+  }
+  if (desc.includes('订单') || desc.includes('交易')) {
+    return '订单/交易';
+  }
+  return '实体';
 }
 
 
