@@ -90,7 +90,7 @@ class RAGRetrievalTool extends Tool {
       if (this.conversation.data_source_id) {
         return this.conversation.data_source_id;
       }
-      
+
       // 如果conversation有project_id，从项目获取data_source_id
       if (this.conversation.project_id) {
         try {
@@ -110,7 +110,10 @@ class RAGRetrievalTool extends Tool {
       }
     }
 
-    return null;
+    // 如果仍然没有获取到entityId，记录警告但不返回null
+    // 这样可以允许检索所有知识库（不进行数据源隔离）
+    logger.warn('[RAGRetrievalTool] 未找到entityId，将检索所有知识库（不进行数据源隔离）');
+    return null; // 返回null表示不进行数据源隔离，检索所有知识
   }
 
   /**
@@ -138,8 +141,20 @@ class RAGRetrievalTool extends Tool {
         fileIds,
       } = options;
 
+      logger.info('[RAGRetrievalTool] 调用RAGService.query:', {
+        query: query.substring(0, 30),
+        userId,
+        types: types || ['semantic_model', 'qa_pair', 'synonym', 'business_knowledge'],
+        topK,
+        useReranking,
+        enhancedReranking,
+        entityId,
+        fileIds,
+      });
+
       const ragService = this.getRAGService();
-      
+      logger.info('[RAGRetrievalTool] RAGService实例已创建');
+
       const result = await ragService.query({
         query,
         userId,
@@ -153,9 +168,20 @@ class RAGRetrievalTool extends Tool {
         },
       });
 
+      logger.info('[RAGRetrievalTool] RAGService.query返回结果:', {
+        total: result.total,
+        hasResults: result.results && result.results.length > 0,
+        metadata: result.metadata,
+      });
+
       return result;
     } catch (error) {
       logger.error('[RAGRetrievalTool] RAG检索失败:', error);
+      logger.error('[RAGRetrievalTool] 错误详情:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
       throw new Error(error.message || 'RAG检索失败');
     }
   }
@@ -214,12 +240,26 @@ class RAGRetrievalTool extends Tool {
         query: query.substring(0, 50),
         types,
         topK: top_k,
+        inputEntityId: entity_id,
+        toolUserId: this.userId,
+        conversation: this.conversation ? {
+          data_source_id: this.conversation.data_source_id,
+          project_id: this.conversation.project_id,
+          conversationId: this.conversation.conversationId
+        } : null
       });
 
       const userId = this.userId || 'system';
-      
+      logger.info('[RAGRetrievalTool] 使用userId:', userId);
+
+      // 检查userId是否有效
+      if (!userId || userId === 'system') {
+        logger.warn('[RAGRetrievalTool] userId无效，可能导致权限问题');
+      }
+
       // 自动获取entityId（如果未提供）
       const finalEntityId = entity_id || await this.getEntityId(input);
+      logger.info('[RAGRetrievalTool] 最终entityId:', finalEntityId);
 
       const ragResults = await this.retrieveKnowledge(query, userId, {
         types,

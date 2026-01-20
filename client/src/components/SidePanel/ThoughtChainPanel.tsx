@@ -247,12 +247,29 @@ function SidePanelToolCallItem({
 
   // 获取子工具名称（如果是 because_skills）
   const subToolName = useMemo(() => {
-    if (function_name === 'because_skills' && parsedArgs && typeof parsedArgs === 'object' && 'command' in parsedArgs) {
-      const command = parsedArgs.command as string;
-      return becauseSkillsCommandMap[command] || command;
+    if (function_name === 'because_skills') {
+      // 首先尝试从解析后的参数中获取
+      if (parsedArgs && typeof parsedArgs === 'object' && 'command' in parsedArgs) {
+        const command = parsedArgs.command as string;
+        return becauseSkillsCommandMap[command] || command;
+      }
+
+      // 如果解析失败，尝试从原始字符串中提取 command
+      if (typeof toolCall.args === 'string') {
+        try {
+          // 尝试查找 "command":"value" 模式
+          const commandMatch = toolCall.args.match(/"command"\s*:\s*"([^"]+)"/);
+          if (commandMatch && commandMatch[1]) {
+            const command = commandMatch[1];
+            return becauseSkillsCommandMap[command] || command;
+          }
+        } catch {
+          // 忽略解析错误
+        }
+      }
     }
     return null;
-  }, [function_name, parsedArgs]);
+  }, [function_name, parsedArgs, toolCall.args]);
 
   // 格式化参数
   const args = useMemo(() => {

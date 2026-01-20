@@ -7,6 +7,14 @@ export interface DataSourceConnectionPool {
   connectionTimeoutMillis?: number;
 }
 
+export interface DataSourceSSL {
+  enabled?: boolean;
+  rejectUnauthorized?: boolean;
+  ca?: string | null;
+  cert?: string | null;
+  key?: string | null;
+}
+
 export interface DataSource {
   _id: string;
   name: string;
@@ -17,6 +25,7 @@ export interface DataSource {
   username: string;
   status?: 'active' | 'inactive';
   connectionPool?: DataSourceConnectionPool;
+  ssl?: DataSourceSSL;
   lastTestedAt?: string;
   lastTestResult?: 'success' | 'failed';
   lastTestError?: string;
@@ -34,6 +43,7 @@ export interface DataSourceCreateParams {
   username: string;
   password: string;
   connectionPool?: DataSourceConnectionPool;
+  ssl?: DataSourceSSL;
   status?: 'active' | 'inactive';
 }
 
@@ -46,6 +56,7 @@ export interface DataSourceUpdateParams {
   username?: string;
   password?: string;
   connectionPool?: DataSourceConnectionPool;
+  ssl?: DataSourceSSL;
   status?: 'active' | 'inactive';
 }
 

@@ -9,6 +9,14 @@ export interface IDataSourceConnectionPool {
   connectionTimeoutMillis?: number;
 }
 
+export interface IDataSourceSSL {
+  enabled?: boolean;
+  rejectUnauthorized?: boolean;
+  ca?: string | null;
+  cert?: string | null;
+  key?: string | null;
+}
+
 export interface IDataSource extends Document {
   name: string;
   type: DataSourceType;
@@ -18,6 +26,7 @@ export interface IDataSource extends Document {
   username: string;
   password: string; // 加密存储
   connectionPool?: IDataSourceConnectionPool;
+  ssl?: IDataSourceSSL;
   status?: 'active' | 'inactive';
   lastTestedAt?: Date;
   lastTestResult?: 'success' | 'failed';

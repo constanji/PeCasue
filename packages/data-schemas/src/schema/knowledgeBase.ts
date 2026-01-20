@@ -89,8 +89,8 @@ const knowledgeEntrySchema: Schema<IKnowledgeEntry> = new Schema(
     parent_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'KnowledgeEntry',
-      index: true,
       default: null,
+      index: true,
     },
     metadata: {
       type: mongoose.Schema.Types.Mixed,
@@ -107,7 +107,7 @@ knowledgeEntrySchema.index({ user: 1, type: 1 });
 knowledgeEntrySchema.index({ 'metadata.file_id': 1 });
 knowledgeEntrySchema.index({ 'metadata.semantic_model_id': 1 });
 knowledgeEntrySchema.index({ 'metadata.entity_id': 1 });
-knowledgeEntrySchema.index({ parent_id: 1 }); // 父子关系索引
+// Note: parent_id index is defined in the field schema above
 knowledgeEntrySchema.index({ createdAt: -1 });
 
 export default knowledgeEntrySchema;

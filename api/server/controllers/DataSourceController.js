@@ -72,7 +72,7 @@ async function decryptPassword(encryptedText) {
  * @returns {Promise<{success: boolean, error?: string}>}
  */
 async function testDatabaseConnection(config) {
-  const { type, host, port, database, username, password } = config;
+  const { type, host, port, database, username, password, ssl } = config;
 
   try {
     if (type === 'mysql') {
@@ -88,14 +88,33 @@ async function testDatabaseConnection(config) {
         };
       }
 
-      const connection = await mysql.createConnection({
+      const connectionConfig = {
         host,
         port,
         user: username,
         password,
         database,
         connectTimeout: 10000,
-      });
+      };
+
+      // MySQL SSL配置
+      if (ssl && ssl.enabled) {
+        connectionConfig.ssl = {};
+        if (ssl.ca) {
+          connectionConfig.ssl.ca = ssl.ca;
+        }
+        if (ssl.cert) {
+          connectionConfig.ssl.cert = ssl.cert;
+        }
+        if (ssl.key) {
+          connectionConfig.ssl.key = ssl.key;
+        }
+        if (ssl.rejectUnauthorized !== undefined) {
+          connectionConfig.ssl.rejectUnauthorized = ssl.rejectUnauthorized;
+        }
+      }
+
+      const connection = await mysql.createConnection(connectionConfig);
 
       await connection.ping();
       await connection.end();
@@ -115,14 +134,33 @@ async function testDatabaseConnection(config) {
       }
 
       const { Client } = pg;
-      const client = new Client({
+      const clientConfig = {
         host,
         port,
         database,
         user: username,
         password,
         connectionTimeoutMillis: 10000,
-      });
+      };
+
+      // PostgreSQL SSL配置
+      if (ssl && ssl.enabled) {
+        clientConfig.ssl = {};
+        if (ssl.rejectUnauthorized !== undefined) {
+          clientConfig.ssl.rejectUnauthorized = ssl.rejectUnauthorized;
+        }
+        if (ssl.ca) {
+          clientConfig.ssl.ca = ssl.ca;
+        }
+        if (ssl.cert) {
+          clientConfig.ssl.cert = ssl.cert;
+        }
+        if (ssl.key) {
+          clientConfig.ssl.key = ssl.key;
+        }
+      }
+
+      const client = new Client(clientConfig);
 
       await client.connect();
       await client.query('SELECT NOW()');
@@ -150,7 +188,7 @@ async function testDatabaseConnection(config) {
  * @returns {Promise<{success: boolean, schema?: Object, error?: string}>}
  */
 async function getDatabaseSchema(config) {
-  const { type, host, port, database, username, password } = config;
+  const { type, host, port, database, username, password, ssl } = config;
 
   try {
     if (type === 'mysql') {
@@ -164,14 +202,33 @@ async function getDatabaseSchema(config) {
         };
       }
 
-      const connection = await mysql.createConnection({
+      const connectionConfig = {
         host,
         port,
         user: username,
         password,
         database,
         connectTimeout: 10000,
-      });
+      };
+
+      // MySQL SSL配置
+      if (ssl && ssl.enabled) {
+        connectionConfig.ssl = {};
+        if (ssl.ca) {
+          connectionConfig.ssl.ca = ssl.ca;
+        }
+        if (ssl.cert) {
+          connectionConfig.ssl.cert = ssl.cert;
+        }
+        if (ssl.key) {
+          connectionConfig.ssl.key = ssl.key;
+        }
+        if (ssl.rejectUnauthorized !== undefined) {
+          connectionConfig.ssl.rejectUnauthorized = ssl.rejectUnauthorized;
+        }
+      }
+
+      const connection = await mysql.createConnection(connectionConfig);
 
       try {
         // 获取所有表
@@ -254,14 +311,33 @@ async function getDatabaseSchema(config) {
       }
 
       const { Client } = pg;
-      const client = new Client({
+      const clientConfig = {
         host,
         port,
         database,
         user: username,
         password,
         connectionTimeoutMillis: 10000,
-      });
+      };
+
+      // PostgreSQL SSL配置
+      if (ssl && ssl.enabled) {
+        clientConfig.ssl = {};
+        if (ssl.rejectUnauthorized !== undefined) {
+          clientConfig.ssl.rejectUnauthorized = ssl.rejectUnauthorized;
+        }
+        if (ssl.ca) {
+          clientConfig.ssl.ca = ssl.ca;
+        }
+        if (ssl.cert) {
+          clientConfig.ssl.cert = ssl.cert;
+        }
+        if (ssl.key) {
+          clientConfig.ssl.key = ssl.key;
+        }
+      }
+
+      const client = new Client(clientConfig);
 
       await client.connect();
 
@@ -453,6 +529,7 @@ async function createDataSourceHandler(req, res) {
       username,
       password,
       connectionPool,
+      ssl,
       status = 'active',
     } = req.body;
 
@@ -491,6 +568,23 @@ async function createDataSourceHandler(req, res) {
           connectionTimeoutMillis: 10000,
         };
 
+    // SSL配置
+    const sslConfig = ssl
+      ? {
+          enabled: ssl.enabled ?? false,
+          rejectUnauthorized: ssl.rejectUnauthorized ?? true,
+          ca: ssl.ca || null,
+          cert: ssl.cert || null,
+          key: ssl.key || null,
+        }
+      : {
+          enabled: false,
+          rejectUnauthorized: true,
+          ca: null,
+          cert: null,
+          key: null,
+        };
+
     const dataSource = await createDataSource({
       name,
       type,
@@ -500,6 +594,7 @@ async function createDataSourceHandler(req, res) {
       username,
       password: encryptedPassword,
       connectionPool: poolConfig,
+      ssl: sslConfig,
       status,
       createdBy: mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId,
     });
@@ -597,6 +692,28 @@ async function updateDataSourceHandler(req, res) {
         idleTimeoutMillis: updateData.connectionPool.idleTimeoutMillis ?? 30000,
         connectionTimeoutMillis: updateData.connectionPool.connectionTimeoutMillis ?? 10000,
       };
+    }
+
+    // 如果提供了SSL配置，确保所有字段都有值
+    if (updateData.ssl !== undefined) {
+      if (updateData.ssl === null) {
+        // 如果显式设置为null，则删除SSL配置
+        updateData.ssl = {
+          enabled: false,
+          rejectUnauthorized: true,
+          ca: null,
+          cert: null,
+          key: null,
+        };
+      } else {
+        updateData.ssl = {
+          enabled: updateData.ssl.enabled ?? false,
+          rejectUnauthorized: updateData.ssl.rejectUnauthorized ?? true,
+          ca: updateData.ssl.ca || null,
+          cert: updateData.ssl.cert || null,
+          key: updateData.ssl.key || null,
+        };
+      }
     }
 
     // 不允许修改name和createdBy
@@ -731,6 +848,7 @@ async function testDataSourceConnectionHandler(req, res) {
       database: dataSource.database,
       username: dataSource.username,
       password,
+      ssl: dataSource.ssl,
     });
 
     // 更新连接状态
@@ -769,7 +887,7 @@ async function testDataSourceConnectionHandler(req, res) {
  */
 async function testConnectionHandler(req, res) {
   try {
-    const { type, host, port, database, username, password } = req.body;
+    const { type, host, port, database, username, password, ssl } = req.body;
 
     if (!type || !host || !port || !database || !username || !password) {
       return res.status(400).json({
@@ -785,6 +903,7 @@ async function testConnectionHandler(req, res) {
       database,
       username,
       password,
+      ssl,
     });
 
     return res.status(200).json({
@@ -869,6 +988,7 @@ async function getDataSourceSchemaHandler(req, res) {
       database: dataSource.database,
       username: dataSource.username,
       password,
+      ssl: dataSource.ssl,
     });
 
     if (!result.success) {

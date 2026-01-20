@@ -27,7 +27,7 @@ export default function DataSourceEditor({ dataSource, onSave, onCancel }: DataS
     watch,
     setValue,
   } = useForm<DataSourceCreateParams>({
-    defaultValues: dataSource
+        defaultValues: dataSource
       ? {
           name: dataSource.name,
           type: dataSource.type,
@@ -37,12 +37,19 @@ export default function DataSourceEditor({ dataSource, onSave, onCancel }: DataS
           username: dataSource.username,
           password: '', // 不显示密码
           connectionPool: dataSource.connectionPool,
+          ssl: dataSource.ssl || {
+            enabled: false,
+            rejectUnauthorized: true,
+            ca: null,
+            cert: null,
+            key: null,
+          },
           status: dataSource.status || 'active',
         }
       : {
           name: '',
           type: 'mysql',
-          host: 'localhost',
+          host: '',
           port: 3306,
           database: '',
           username: '',
@@ -52,6 +59,13 @@ export default function DataSourceEditor({ dataSource, onSave, onCancel }: DataS
             max: 10,
             idleTimeoutMillis: 30000,
             connectionTimeoutMillis: 10000,
+          },
+          ssl: {
+            enabled: false,
+            rejectUnauthorized: true,
+            ca: null,
+            cert: null,
+            key: null,
           },
           status: 'active',
         },
@@ -68,6 +82,13 @@ export default function DataSourceEditor({ dataSource, onSave, onCancel }: DataS
         username: dataSource.username,
         password: '', // 不显示密码
         connectionPool: dataSource.connectionPool,
+        ssl: dataSource.ssl || {
+          enabled: false,
+          rejectUnauthorized: true,
+          ca: null,
+          cert: null,
+          key: null,
+        },
         status: dataSource.status || 'active',
       });
     }
@@ -222,11 +243,16 @@ export default function DataSourceEditor({ dataSource, onSave, onCancel }: DataS
                       control={control}
                       rules={{ required: '主机地址是必需的' }}
                       render={({ field }) => (
-                        <input
-                          {...field}
-                          className={cn(defaultTextProps, 'w-full')}
-                          placeholder="localhost"
-                        />
+                        <>
+                          <input
+                            {...field}
+                            className={cn(defaultTextProps, 'w-full')}
+                            placeholder="localhost 或 IP地址 或 域名"
+                          />
+                          <p className="mt-1.5 text-xs text-text-secondary">
+                            支持本地数据库（localhost）和远程数据库（IP地址或域名）
+                          </p>
+                        </>
                       )}
                     />
                   </div>
@@ -324,6 +350,124 @@ export default function DataSourceEditor({ dataSource, onSave, onCancel }: DataS
                     )}
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* SSL配置 */}
+            <div className="rounded-lg border border-border-light bg-surface-primary p-6">
+              <h4 className="mb-6 text-base font-semibold text-text-primary">SSL/TLS 配置（可选）</h4>
+              <div className="space-y-5">
+                <div>
+                  <Controller
+                    name="ssl.enabled"
+                    control={control}
+                    render={({ field }) => (
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={field.value || false}
+                          onChange={(e) => {
+                            field.onChange(e.target.checked);
+                            if (!e.target.checked) {
+                              setValue('ssl.rejectUnauthorized', true);
+                              setValue('ssl.ca', null);
+                              setValue('ssl.cert', null);
+                              setValue('ssl.key', null);
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-gray-300"
+                        />
+                        <span className="text-sm font-medium text-text-primary">启用 SSL/TLS 连接</span>
+                      </label>
+                    )}
+                  />
+                  <p className="mt-1.5 text-xs text-text-secondary">
+                    对于远程数据库连接，建议启用 SSL/TLS 以保护数据传输安全
+                  </p>
+                </div>
+
+                {watch('ssl.enabled') && (
+                  <>
+                    <div>
+                      <Controller
+                        name="ssl.rejectUnauthorized"
+                        control={control}
+                        render={({ field }) => (
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={field.value !== undefined ? field.value : true}
+                              onChange={(e) => field.onChange(e.target.checked)}
+                              className="h-4 w-4 rounded border-gray-300"
+                            />
+                            <span className="text-sm font-medium text-text-primary">验证服务器证书</span>
+                          </label>
+                        )}
+                      />
+                      <p className="mt-1.5 text-xs text-text-secondary">
+                        取消勾选将允许自签名证书（不推荐用于生产环境）
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-text-primary">
+                        CA 证书（可选）
+                      </label>
+                      <Controller
+                        name="ssl.ca"
+                        control={control}
+                        render={({ field }) => (
+                          <textarea
+                            {...field}
+                            value={field.value || ''}
+                            onChange={(e) => field.onChange(e.target.value || null)}
+                            className={cn(defaultTextProps, 'w-full min-h-[100px] font-mono text-xs')}
+                            placeholder="PEM格式的CA证书内容（可选）"
+                          />
+                        )}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-text-primary">
+                          客户端证书（可选）
+                        </label>
+                        <Controller
+                          name="ssl.cert"
+                          control={control}
+                          render={({ field }) => (
+                            <textarea
+                              {...field}
+                              value={field.value || ''}
+                              onChange={(e) => field.onChange(e.target.value || null)}
+                              className={cn(defaultTextProps, 'w-full min-h-[100px] font-mono text-xs')}
+                              placeholder="PEM格式的客户端证书内容（可选）"
+                            />
+                          )}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-text-primary">
+                          客户端私钥（可选）
+                        </label>
+                        <Controller
+                          name="ssl.key"
+                          control={control}
+                          render={({ field }) => (
+                            <textarea
+                              {...field}
+                              value={field.value || ''}
+                              onChange={(e) => field.onChange(e.target.value || null)}
+                              className={cn(defaultTextProps, 'w-full min-h-[100px] font-mono text-xs')}
+                              placeholder="PEM格式的客户端私钥内容（可选）"
+                            />
+                          )}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 

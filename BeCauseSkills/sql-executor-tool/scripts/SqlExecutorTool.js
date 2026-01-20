@@ -126,7 +126,7 @@ class SqlExecutorTool extends Tool {
     // 根据数据库类型创建连接池
     let pool;
     if (dataSource.type === 'mysql') {
-      pool = mysql.createPool({
+      const poolConfig = {
         host: dataSource.host,
         port: dataSource.port,
         user: dataSource.username,
@@ -136,9 +136,28 @@ class SqlExecutorTool extends Tool {
         connectionLimit: dataSource.connectionPool?.max || 10,
         queueLimit: 0,
         connectTimeout: dataSource.connectionPool?.connectionTimeoutMillis || 10000,
-      });
+      };
+
+      // MySQL SSL配置
+      if (dataSource.ssl && dataSource.ssl.enabled) {
+        poolConfig.ssl = {};
+        if (dataSource.ssl.ca) {
+          poolConfig.ssl.ca = dataSource.ssl.ca;
+        }
+        if (dataSource.ssl.cert) {
+          poolConfig.ssl.cert = dataSource.ssl.cert;
+        }
+        if (dataSource.ssl.key) {
+          poolConfig.ssl.key = dataSource.ssl.key;
+        }
+        if (dataSource.ssl.rejectUnauthorized !== undefined) {
+          poolConfig.ssl.rejectUnauthorized = dataSource.ssl.rejectUnauthorized;
+        }
+      }
+
+      pool = mysql.createPool(poolConfig);
     } else if (dataSource.type === 'postgresql') {
-      pool = new Pool({
+      const poolConfig = {
         host: dataSource.host,
         port: dataSource.port,
         user: dataSource.username,
@@ -148,7 +167,26 @@ class SqlExecutorTool extends Tool {
         min: dataSource.connectionPool?.min || 0,
         idleTimeoutMillis: dataSource.connectionPool?.idleTimeoutMillis || 30000,
         connectionTimeoutMillis: dataSource.connectionPool?.connectionTimeoutMillis || 10000,
-      });
+      };
+
+      // PostgreSQL SSL配置
+      if (dataSource.ssl && dataSource.ssl.enabled) {
+        poolConfig.ssl = {};
+        if (dataSource.ssl.rejectUnauthorized !== undefined) {
+          poolConfig.ssl.rejectUnauthorized = dataSource.ssl.rejectUnauthorized;
+        }
+        if (dataSource.ssl.ca) {
+          poolConfig.ssl.ca = dataSource.ssl.ca;
+        }
+        if (dataSource.ssl.cert) {
+          poolConfig.ssl.cert = dataSource.ssl.cert;
+        }
+        if (dataSource.ssl.key) {
+          poolConfig.ssl.key = dataSource.ssl.key;
+        }
+      }
+
+      pool = new Pool(poolConfig);
     } else {
       throw new Error(`不支持的数据库类型: ${dataSource.type}`);
     }

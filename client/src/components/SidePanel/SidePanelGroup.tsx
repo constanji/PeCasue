@@ -44,9 +44,9 @@ const SidePanelGroup = memo(
     const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
     const [fullCollapse, setFullCollapse] = useState(fullPanelCollapse);
     const [collapsedSize, setCollapsedSize] = useState(navCollapsedSize);
-    // 思维链初始即为收起状态，minSize 为 0，避免一开始预留宽度
+    // 思维链初始即为收起状态，但允许一定的最小拖拽空间
     const [thoughtChainCollapsed, setThoughtChainCollapsed] = useState(true);
-    const [thoughtChainMinSize, setThoughtChainMinSize] = useState(0);
+    const [thoughtChainMinSize, setThoughtChainMinSize] = useState(5);
 
     const isSmallScreen = useMediaQuery('(max-width: 767px)');
     const hideSidePanel = useRecoilValue(store.hideSidePanel);
@@ -85,7 +85,7 @@ const SidePanelGroup = memo(
         setFullCollapse(true);
         // 小屏下默认收起思维链
         setThoughtChainCollapsed(true);
-        setThoughtChainMinSize(0);
+        setThoughtChainMinSize(5);
         localStorage.setItem('fullPanelCollapse', 'true');
         panelRef.current?.collapse();
         thoughtChainPanelRef.current?.collapse();
@@ -96,7 +96,7 @@ const SidePanelGroup = memo(
         setMinSize(defaultMinSize);
         // 大屏下也默认收起思维链（忽略历史状态），并实际折叠面板
         setThoughtChainCollapsed(true);
-        setThoughtChainMinSize(0);
+        setThoughtChainMinSize(5);
         localStorage.setItem('thoughtChainCollapsed', 'true');
         thoughtChainPanelRef.current?.collapse();
       }
@@ -122,15 +122,16 @@ const SidePanelGroup = memo(
     const toggleThoughtChainVisible = useCallback(() => {
       setThoughtChainCollapsed((prev) => {
         const next = !prev;
-        setThoughtChainMinSize(next ? 0 : 20);
+        // 设置合理的最小尺寸：折叠时允许5%的拖拽空间，展开时允许20%的最小宽度
+        setThoughtChainMinSize(next ? 5 : 20);
         localStorage.setItem('thoughtChainCollapsed', next ? 'true' : 'false');
 
         if (next) {
-          // 折叠
-          thoughtChainPanelRef.current?.collapse();
+          // 折叠到最小尺寸
+          thoughtChainPanelRef.current?.resize(5);
         } else {
-          // 展开
-          thoughtChainPanelRef.current?.expand();
+          // 展开到默认尺寸
+          thoughtChainPanelRef.current?.resize(25);
         }
 
         return next;
@@ -188,13 +189,10 @@ const SidePanelGroup = memo(
                   side="right"
                 />
               </div>
-              {/* 拖动条 - 始终存在，但只在面板展开时可见和可交互 */}
+              {/* 拖动条 - 始终可见和可交互，类似原右侧边栏行为 */}
               <ResizableHandleAlt
-                withHandle={!thoughtChainCollapsed}
-                className={cn(
-                  'bg-border-medium text-text-primary',
-                  thoughtChainCollapsed && 'opacity-0 pointer-events-none',
-                )}
+                withHandle
+                className="bg-border-medium text-text-primary"
               />
               <ResizablePanel
                 ref={thoughtChainPanelRef}
@@ -207,7 +205,7 @@ const SidePanelGroup = memo(
                 id="thought-chain-panel"
                 onCollapse={() => {
                   setThoughtChainCollapsed(true);
-                  setThoughtChainMinSize(0);
+                  setThoughtChainMinSize(5);
                   localStorage.setItem('thoughtChainCollapsed', 'true');
                 }}
                 onExpand={() => {

@@ -62,6 +62,28 @@ const dataSourceSchema = new Schema<IDataSource>(
         min: 1000,
       },
     },
+    ssl: {
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+      rejectUnauthorized: {
+        type: Boolean,
+        default: true,
+      },
+      ca: {
+        type: String,
+        default: null,
+      },
+      cert: {
+        type: String,
+        default: null,
+      },
+      key: {
+        type: String,
+        default: null,
+      },
+    },
     status: {
       type: String,
       enum: ['active', 'inactive'],

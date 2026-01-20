@@ -89,7 +89,7 @@ services:
 
   # MongoDB 数据库（与生产环境共享数据）
   mongodb:
-    container_name: pyqchat-mongodb-dev
+    container_name: -mongodb-dev
     image: mongo
     restart: unless-stopped
     networks:
