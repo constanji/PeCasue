@@ -49,7 +49,13 @@ export default function NavToggle({
         onClick={onToggle}
         role="button"
         description={
-          navVisible ? localize('com_nav_close_sidebar') : localize('com_nav_open_sidebar')
+          navVisible
+            ? side === 'right'
+              ? localize('com_nav_close_thought_chain')
+              : localize('com_nav_close_sidebar')
+            : side === 'right'
+              ? localize('com_nav_open_thought_chain')
+              : localize('com_nav_open_sidebar')
         }
         className="flex items-center justify-center"
         tabIndex={0}
