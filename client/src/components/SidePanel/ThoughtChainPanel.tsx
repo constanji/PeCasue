@@ -248,23 +248,64 @@ function SidePanelToolCallItem({
   // 获取子工具名称（如果是 because_skills）
   const subToolName = useMemo(() => {
     if (function_name === 'because_skills') {
-      // 首先尝试从解析后的参数中获取
-      if (parsedArgs && typeof parsedArgs === 'object' && 'command' in parsedArgs) {
-        const command = parsedArgs.command as string;
-        return becauseSkillsCommandMap[command] || command;
-      }
-
-      // 如果解析失败，尝试从原始字符串中提取 command
-      if (typeof toolCall.args === 'string') {
-        try {
-          // 尝试查找 "command":"value" 模式
-          const commandMatch = toolCall.args.match(/"command"\s*:\s*"([^"]+)"/);
-          if (commandMatch && commandMatch[1]) {
-            const command = commandMatch[1];
+      // 方法1: 从解析后的参数中获取（优先）
+      if (parsedArgs && typeof parsedArgs === 'object' && parsedArgs !== null) {
+        if ('command' in parsedArgs) {
+          const command = parsedArgs.command as string;
+          if (command && typeof command === 'string' && command.length > 0) {
             return becauseSkillsCommandMap[command] || command;
           }
-        } catch {
-          // 忽略解析错误
+        }
+      }
+
+      // 方法2: 直接从对象格式的 args 中提取
+      if (typeof toolCall.args === 'object' && toolCall.args !== null && !Array.isArray(toolCall.args)) {
+        if ('command' in toolCall.args) {
+          const command = (toolCall.args as any).command;
+          if (command && typeof command === 'string' && command.length > 0) {
+            return becauseSkillsCommandMap[command] || command;
+          }
+        }
+      }
+
+      // 方法3: 从原始字符串中提取 command（支持流式传输中的不完整JSON）
+      if (typeof toolCall.args === 'string' && toolCall.args.length > 0) {
+        // 方法1: 尝试匹配双引号格式 "command":"value"
+        let commandMatch = toolCall.args.match(/"command"\s*:\s*"([^"]+)"/);
+        if (commandMatch && commandMatch[1]) {
+          const command = commandMatch[1];
+          if (command && command.length > 0) {
+            return becauseSkillsCommandMap[command] || command;
+          }
+        }
+
+        // 方法2: 尝试匹配单引号格式 'command':'value' (不标准但可能遇到)
+        commandMatch = toolCall.args.match(/'command'\s*:\s*'([^']+)'/);
+        if (commandMatch && commandMatch[1]) {
+          const command = commandMatch[1];
+          if (command && command.length > 0) {
+            return becauseSkillsCommandMap[command] || command;
+          }
+        }
+
+        // 方法3: 尝试匹配不带引号的格式 "command":value (value可能是字符串或标识符)
+        commandMatch = toolCall.args.match(/"command"\s*:\s*([^,}\s]+)/);
+        if (commandMatch && commandMatch[1]) {
+          let command = commandMatch[1].replace(/^["']|["']$/g, ''); // 移除首尾引号
+          if (command && command.length > 0) {
+            return becauseSkillsCommandMap[command] || command;
+          }
+        }
+
+        // 方法4: 尝试部分匹配（流式传输中可能只有部分内容）
+        // 查找 "command" 后面的内容，即使JSON不完整
+        const partialMatch = toolCall.args.match(/"command"\s*:\s*"([^"]*)/);
+        if (partialMatch && partialMatch[1] && partialMatch[1].length > 0) {
+          const command = partialMatch[1];
+          // 只返回有效的命令（在映射表中或至少3个字符）
+          if (command.length >= 3) {
+            return becauseSkillsCommandMap[command] || command;
+          }
         }
       }
     }
@@ -313,8 +354,59 @@ function SidePanelToolCallItem({
 
   // 获取标题文本
   const getTitle = () => {
-    // 如果是 because_skills 且有子工具名称，使用子工具名称
-    const displayName = subToolName || function_name;
+    // 如果是 because_skills，优先使用子工具名称
+    // 即使在运行时（isLoading），也要尝试提取工具名称
+    let displayName = subToolName;
+    
+    // 如果 subToolName 为空，且是 because_skills，尝试实时提取
+    if (!displayName && function_name === 'because_skills') {
+      // 方法1: 从解析后的对象中提取（优先）
+      if (parsedArgs && typeof parsedArgs === 'object' && parsedArgs !== null) {
+        if ('command' in parsedArgs) {
+          const command = parsedArgs.command as string;
+          if (command && typeof command === 'string' && command.length > 0) {
+            displayName = becauseSkillsCommandMap[command] || command;
+          }
+        }
+      }
+      
+      // 方法2: 从原始字符串中提取（流式传输中可能只有部分内容）
+      if (!displayName && typeof toolCall.args === 'string' && toolCall.args.length > 0) {
+        // 尝试多种格式匹配
+        let commandMatch = toolCall.args.match(/"command"\s*:\s*"([^"]+)"/);
+        if (!commandMatch) {
+          commandMatch = toolCall.args.match(/"command"\s*:\s*"([^"]*)/); // 部分匹配
+        }
+        if (!commandMatch) {
+          commandMatch = toolCall.args.match(/'command'\s*:\s*'([^']+)'/); // 单引号
+        }
+        if (!commandMatch) {
+          commandMatch = toolCall.args.match(/"command"\s*:\s*([^,}\s]+)/); // 无引号
+        }
+        
+        if (commandMatch && commandMatch[1]) {
+          let command = commandMatch[1].replace(/^["']|["']$/g, ''); // 移除首尾引号
+          if (command && command.length >= 3) { // 至少3个字符才认为是有效命令
+            displayName = becauseSkillsCommandMap[command] || command;
+          }
+        }
+      }
+      
+      // 方法3: 从对象格式的 args 中直接提取
+      if (!displayName && typeof toolCall.args === 'object' && toolCall.args !== null) {
+        if ('command' in toolCall.args) {
+          const command = (toolCall.args as any).command;
+          if (command && typeof command === 'string' && command.length > 0) {
+            displayName = becauseSkillsCommandMap[command] || command;
+          }
+        }
+      }
+    }
+    
+    // 如果还是没有提取到，使用 function_name（但避免显示 because_skills）
+    if (!displayName) {
+      displayName = function_name === 'because_skills' ? null : function_name;
+    }
     
     if (isLoading) {
       return displayName

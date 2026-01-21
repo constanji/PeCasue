@@ -454,10 +454,24 @@ async function getDatabaseSchema(config) {
  */
 async function getDataSourcesHandler(req, res) {
   try {
-    const dataSources = await getDataSources({});
+    const { SystemRoles } = require('@because/data-provider');
+    const isAdmin = req.user?.role === SystemRoles.ADMIN;
+    
+    let dataSources = await getDataSources({});
 
-    // 移除密码字段
-    const sanitizedDataSources = dataSources.map(({ password, ...rest }) => rest);
+    // 如果不是管理员，只返回公开的数据源
+    if (!isAdmin) {
+      dataSources = dataSources.filter(ds => {
+        const isPublic = ds.isPublic !== undefined ? Boolean(ds.isPublic) : false;
+        return isPublic === true;
+      });
+    }
+
+    // 移除密码字段，确保 isPublic 字段存在（兼容旧数据）
+    const sanitizedDataSources = dataSources.map(({ password, ...rest }) => ({
+      ...rest,
+      isPublic: rest.isPublic !== undefined ? Boolean(rest.isPublic) : false,
+    }));
 
     return res.status(200).json({
       success: true,
@@ -497,8 +511,12 @@ async function getDataSourceHandler(req, res) {
       });
     }
 
-    // 移除密码字段
-    const { password, ...sanitizedDataSource } = dataSource;
+    // 移除密码字段，确保 isPublic 字段存在（兼容旧数据）
+    const { password, ...rest } = dataSource;
+    const sanitizedDataSource = {
+      ...rest,
+      isPublic: rest.isPublic !== undefined ? Boolean(rest.isPublic) : false,
+    };
 
     return res.status(200).json({
       success: true,
@@ -531,6 +549,7 @@ async function createDataSourceHandler(req, res) {
       connectionPool,
       ssl,
       status = 'active',
+      isPublic = false,
     } = req.body;
 
     // 验证必填字段
@@ -596,6 +615,7 @@ async function createDataSourceHandler(req, res) {
       connectionPool: poolConfig,
       ssl: sslConfig,
       status,
+      isPublic,
       createdBy: mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId,
     });
 
@@ -720,6 +740,11 @@ async function updateDataSourceHandler(req, res) {
     delete updateData.name;
     delete updateData.createdBy;
 
+    // 确保 isPublic 字段被正确设置
+    if (updateData.isPublic !== undefined) {
+      updateData.isPublic = Boolean(updateData.isPublic);
+    }
+
     const updatedDataSource = await updateDataSource(id, updateData);
     if (!updatedDataSource) {
       return res.status(404).json({
@@ -728,8 +753,12 @@ async function updateDataSourceHandler(req, res) {
       });
     }
 
-    // 移除密码字段
-    const { password: _, ...sanitizedDataSource } = updatedDataSource;
+    // 移除密码字段，确保 isPublic 字段存在（兼容旧数据）
+    const { password: _, ...rest } = updatedDataSource;
+    const sanitizedDataSource = {
+      ...rest,
+      isPublic: rest.isPublic !== undefined ? Boolean(rest.isPublic) : false,
+    };
 
     return res.status(200).json({
       success: true,
@@ -929,6 +958,7 @@ async function getDataSourceSchemaHandler(req, res) {
   try {
     const { id } = req.params;
     const { id: userId } = req.user;
+    const isAdmin = req.user?.role === SystemRoles.ADMIN;
 
     logger.info('[getDataSourceSchemaHandler] 开始获取数据库结构', { id, userId });
 
@@ -941,9 +971,12 @@ async function getDataSourceSchemaHandler(req, res) {
       });
     }
 
-    // 检查权限
-    if (dataSource.createdBy.toString() !== userId && req.user.role !== SystemRoles.ADMIN) {
-      logger.warn('[getDataSourceSchemaHandler] 无权访问此数据源', { id, userId, createdBy: dataSource.createdBy });
+    // 检查权限：管理员可以访问所有数据源，普通用户只能访问公开的数据源
+    const isPublic = dataSource.isPublic !== undefined ? Boolean(dataSource.isPublic) : false;
+    const isOwner = dataSource.createdBy.toString() === userId;
+    
+    if (!isAdmin && !isOwner && !isPublic) {
+      logger.warn('[getDataSourceSchemaHandler] 无权访问此数据源', { id, userId, createdBy: dataSource.createdBy, isPublic });
       return res.status(403).json({
         success: false,
         error: '无权访问此数据源',

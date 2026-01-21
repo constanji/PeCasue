@@ -95,7 +95,7 @@ export default function ProjectConfig() {
       {/* 其他配置区域（预留） */}
       <div className="flex-1 rounded-lg border border-border-light bg-surface-secondary p-4">
         <div className="text-sm text-text-secondary">
-          其他配置功能待实现...
+          工具启用状态/功能配置
         </div>
       </div>
     </div>

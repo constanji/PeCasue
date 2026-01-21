@@ -391,14 +391,53 @@ class VectorDBService {
     // 构建查询条件：支持entityId数据源隔离
     let whereClause = 'WHERE embedding IS NOT NULL\n        AND 1 - (embedding <=> $1::vector) >= $2';
     const queryParams = [embeddingStr, minScore];
-    
+
     if (entityId) {
+      // 确保entityId是字符串格式（PostgreSQL JSON字段比较需要精确匹配）
+      let entityIdStr = typeof entityId === 'string' ? entityId : String(entityId);
+      
+      // 移除可能的JSON引号（如果entityId被错误地JSON.stringify了）
+      // 例如："696e11c6c8717a92aee4e699" -> 696e11c6c8717a92aee4e699
+      if (entityIdStr.startsWith('"') && entityIdStr.endsWith('"')) {
+        entityIdStr = entityIdStr.slice(1, -1);
+        logger.warn(`[VectorDBService] searchInTable - 检测到entityId包含引号，已移除: 原始="${entityId}", 处理后="${entityIdStr}"`);
+      }
+      
+      // 诊断：先检查表中是否有匹配的entity_id记录
+      try {
+        const countQuery = `SELECT COUNT(*) as count FROM ${tableName} WHERE metadata->>'entity_id' = $1`;
+        const countResult = await this.pool.query(countQuery, [entityIdStr]);
+        const totalCount = parseInt(countResult.rows[0]?.count || '0', 10);
+        logger.info(`[VectorDBService] searchInTable - 诊断查询: 表 ${tableName} 中entity_id="${entityIdStr}"的总记录数: ${totalCount}`);
+        
+        if (totalCount === 0) {
+          // 检查表中实际存储的entity_id格式
+          const sampleQuery = `SELECT DISTINCT metadata->>'entity_id' as entity_id FROM ${tableName} LIMIT 3`;
+          const sampleResult = await this.pool.query(sampleQuery);
+          const sampleEntityIds = sampleResult.rows.map(r => r.entity_id).filter(Boolean);
+          if (sampleEntityIds.length > 0) {
+            logger.warn(`[VectorDBService] searchInTable - 表中实际存储的entity_id样本: ${JSON.stringify(sampleEntityIds)}`);
+            logger.warn(`[VectorDBService] searchInTable - 查询的entity_id: "${entityIdStr}"`);
+          } else {
+            logger.warn(`[VectorDBService] searchInTable - 表中没有entity_id字段的记录`);
+          }
+        }
+      } catch (diagError) {
+        logger.warn(`[VectorDBService] searchInTable - 诊断查询失败:`, diagError.message);
+      }
+      
+      // 使用metadata->>'entity_id'进行文本比较（这是最直接的方式）
       whereClause += '\n        AND metadata->>\'entity_id\' = $3';
-      queryParams.push(entityId);
+      queryParams.push(entityIdStr);
+      
+      logger.info(`[VectorDBService] searchInTable - 使用entityId过滤: "${entityIdStr}" (原始类型: ${typeof entityId}, 长度: ${entityIdStr.length}, 表: ${tableName})`);
+    } else {
+      logger.info(`[VectorDBService] searchInTable - 未使用entityId过滤 (表: ${tableName})`);
     }
     
+    const limitParamIndex = queryParams.length + 1;
     const query = `
-      SELECT 
+      SELECT
         knowledge_entry_id,
         user_id,
         content,
@@ -407,12 +446,43 @@ class VectorDBService {
       FROM ${tableName}
       ${whereClause}
       ORDER BY embedding <=> $1::vector
-      LIMIT $${queryParams.length + 1}
+      LIMIT $${limitParamIndex}
     `;
 
     queryParams.push(topK);
 
+    logger.debug(`[VectorDBService] searchInTable - 执行SQL查询 (表: ${tableName}):`, {
+      queryPreview: query.substring(0, 200) + '...',
+      paramCount: queryParams.length,
+      entityId: entityId ? (typeof entityId === 'string' ? entityId : String(entityId)) : null,
+    });
+
     const result = await this.pool.query(query, queryParams);
+
+    logger.info(`[VectorDBService] searchInTable - 查询完成 (表: ${tableName}): 返回 ${result.rows.length} 行 (minScore: ${minScore})`);
+    
+    // 如果返回0个结果，尝试不设置minScore限制看看有多少记录
+    if (result.rows.length === 0 && entityId) {
+      try {
+        const testQuery = `
+          SELECT 
+            knowledge_entry_id,
+            1 - (embedding <=> $1::vector) as similarity
+          FROM ${tableName}
+          WHERE embedding IS NOT NULL
+            AND metadata->>'entity_id' = $2
+          ORDER BY embedding <=> $1::vector
+          LIMIT 5
+        `;
+        const testResult = await this.pool.query(testQuery, [embeddingStr, typeof entityId === 'string' ? entityId : String(entityId)]);
+        if (testResult.rows.length > 0) {
+          const maxSimilarity = Math.max(...testResult.rows.map(r => parseFloat(r.similarity)));
+          logger.warn(`[VectorDBService] searchInTable - 未设置minScore限制时找到 ${testResult.rows.length} 条记录，最高相似度: ${maxSimilarity.toFixed(4)} (minScore要求: ${minScore})`);
+        }
+      } catch (testError) {
+        logger.debug(`[VectorDBService] searchInTable - 测试查询失败:`, testError.message);
+      }
+    }
 
     return result.rows.map(row => ({
       knowledgeEntryId: row.knowledge_entry_id,
@@ -519,7 +589,7 @@ class VectorDBService {
     try {
       const allTypes = ['semantic_model', 'qa_pair', 'synonym', 'business_knowledge'];
       const searchTypes = types && types.length > 0 ? types : allTypes;
-      const isolationInfo = entityId ? `, entityId: ${entityId} (数据源隔离)` : ' (无数据源隔离)';
+      const isolationInfo = entityId ? `, entityId: ${entityId} (数据源隔离, 类型: ${typeof entityId})` : ' (无数据源隔离)';
       logger.info(`[VectorDBService] 开始向量相似度搜索 (类型数: ${searchTypes.length}, topK: ${topK}, minScore: ${minScore})${isolationInfo}`);
 
       // 按照 DAT 架构，从每个类型的独立表中搜索

@@ -44,16 +44,17 @@ class SqlExecutorTool extends Tool {
   name = 'sql_executor';
 
   description =
-    '执行只读的SQL SELECT查询，并返回查询结果和详细的归因分析说明。' +
+    '执行只读的SQL SELECT查询和WITH子句（CTE），并返回查询结果和详细的归因分析说明。' +
     '工具会根据Agent配置的数据源自动连接对应的数据库。' +
-    '支持MySQL和PostgreSQL数据库。';
+    '支持MySQL和PostgreSQL数据库。' +
+    '支持WITH子句（CTE）、复杂子查询、JOIN等高级SQL特性。';
 
   schema = z.object({
     sql: z
       .string()
       .min(1)
       .describe(
-        '要执行的SQL SELECT查询语句。必须是只读查询，禁止包含INSERT/UPDATE/DELETE/DDL等写操作。',
+        '要执行的SQL SELECT查询语句或WITH子句（CTE）。必须是只读查询，禁止包含INSERT/UPDATE/DELETE/DDL等写操作。支持WITH子句、复杂子查询、JOIN等高级SQL特性。',
       ),
     max_rows: z
       .number()
@@ -397,27 +398,90 @@ class SqlExecutorTool extends Tool {
     const { sql, max_rows } = input;
     const trimmedSql = sql.trim();
 
-    // 基础校验：只允许SELECT
-    const upper = trimmedSql.toUpperCase();
-    if (!upper.startsWith('SELECT')) {
+    // 基础校验：支持SELECT和WITH子句（CTE）
+    const upper = trimmedSql.toUpperCase().trim();
+    const isWithClause = upper.startsWith('WITH');
+    const isSelectQuery = upper.startsWith('SELECT');
+    
+    if (!isWithClause && !isSelectQuery) {
       return JSON.stringify(
         {
           success: false,
-          error: '只允许执行SELECT查询，请不要包含INSERT/UPDATE/DELETE/DDL等写操作。',
+          error: '只允许执行SELECT查询或WITH子句（CTE），请不要包含INSERT/UPDATE/DELETE/DDL等写操作。',
         },
         null,
         2,
       );
     }
 
-    // 额外安全检查：禁止危险关键词
-    const dangerousKeywords = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'TRUNCATE', 'CREATE'];
-    for (const keyword of dangerousKeywords) {
-      if (upper.includes(keyword)) {
+    // 如果是以WITH开头，验证其结构：WITH ... AS (SELECT ...)
+    if (isWithClause) {
+      // 检查WITH子句是否包含SELECT（这是只读查询的标志）
+      if (!upper.includes('SELECT')) {
         return JSON.stringify(
           {
             success: false,
-            error: `检测到危险关键词 "${keyword}"，出于安全考虑拒绝执行该查询。`,
+            error: 'WITH子句必须包含SELECT查询，不允许包含写操作。',
+          },
+          null,
+          2,
+        );
+      }
+
+      // 确保WITH子句中没有写操作
+      // 提取所有WITH子句的内容进行检查
+      const withMatches = trimmedSql.matchAll(/\bWITH\s+(\w+)\s+AS\s*\(([\s\S]*?)\)/gi);
+      for (const match of withMatches) {
+        const cteBody = match[2];
+        const cteUpper = cteBody.toUpperCase();
+        
+        // 检查CTE体中是否有写操作
+        const writeOps = [
+          /\bINSERT\s+INTO\b/i,
+          /\bUPDATE\s+\w+\s+SET\b/i,
+          /\bDELETE\s+FROM\b/i,
+          /\bDROP\s+(TABLE|DATABASE)\b/i,
+          /\bCREATE\s+(TABLE|DATABASE)\b/i,
+        ];
+        
+        for (const pattern of writeOps) {
+          if (pattern.test(cteBody)) {
+            return JSON.stringify(
+              {
+                success: false,
+                error: `WITH子句 "${match[1]}" 中包含写操作，不允许执行。`,
+              },
+              null,
+              2,
+            );
+          }
+        }
+      }
+    }
+
+    // 额外安全检查：使用精确的正则表达式匹配SQL语句，避免误判
+    // 避免误判字段名、表名或注释中包含这些关键词
+    const dangerousPatterns = [
+      /\bDROP\s+(TABLE|DATABASE|INDEX|VIEW|PROCEDURE|FUNCTION|TRIGGER)\b/i,
+      /\bDELETE\s+FROM\b/i,
+      /\bUPDATE\s+\w+\s+SET\b/i,
+      /\bINSERT\s+INTO\b/i,
+      /\bALTER\s+TABLE\b/i,
+      /\bTRUNCATE\s+TABLE\b/i,
+      /\bCREATE\s+(TABLE|DATABASE|INDEX|VIEW|PROCEDURE|FUNCTION|TRIGGER)\b/i,
+      /\bGRANT\b/i,
+      /\bREVOKE\b/i,
+      /\bEXEC\s+/i,
+      /\bEXECUTE\s+/i,
+    ];
+
+    for (const pattern of dangerousPatterns) {
+      if (pattern.test(trimmedSql)) {
+        const match = trimmedSql.match(pattern);
+        return JSON.stringify(
+          {
+            success: false,
+            error: `检测到危险操作 "${match[0].trim()}"，出于安全考虑拒绝执行该查询。`,
           },
           null,
           2,

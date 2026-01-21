@@ -247,15 +247,17 @@ router.get('/mcp/custom', requireJwtAuth, checkAdmin, getCustomMCPServersConfig)
 router.post('/mcp/custom', requireJwtAuth, checkAdmin, saveCustomMCPServersConfig);
 router.delete('/mcp/custom/:serverName', requireJwtAuth, checkAdmin, deleteCustomMCPServersConfig);
 
-// 数据源配置路由（需要管理员权限）
-router.get('/data-sources', requireJwtAuth, checkAdmin, getDataSourcesHandler);
+// 数据源配置路由
+// GET 接口：所有已认证用户都可以访问，但普通用户只能看到公开的数据源
+router.get('/data-sources', requireJwtAuth, getDataSourcesHandler);
 router.get('/data-sources/:id', requireJwtAuth, checkAdmin, getDataSourceHandler);
 router.post('/data-sources', requireJwtAuth, checkAdmin, createDataSourceHandler);
 router.put('/data-sources/:id', requireJwtAuth, checkAdmin, updateDataSourceHandler);
 router.delete('/data-sources/:id', requireJwtAuth, checkAdmin, deleteDataSourceHandler);
 router.post('/data-sources/:id/test', requireJwtAuth, checkAdmin, testDataSourceConnectionHandler);
 router.post('/data-sources/test', requireJwtAuth, checkAdmin, testConnectionHandler);
-router.get('/data-sources/:id/schema', requireJwtAuth, checkAdmin, getDataSourceSchemaHandler);
+// GET schema 接口：所有已认证用户都可以访问，但普通用户只能查看公开数据源的结构
+router.get('/data-sources/:id/schema', requireJwtAuth, getDataSourceSchemaHandler);
 router.post('/data-sources/:id/generate-semantic-model', requireJwtAuth, checkAdmin, generateSemanticModelHandler);
 
 // 项目查询路由（需要认证，但不需要管理员权限）

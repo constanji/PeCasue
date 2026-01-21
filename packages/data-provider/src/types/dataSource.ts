@@ -24,6 +24,7 @@ export interface DataSource {
   database: string;
   username: string;
   status?: 'active' | 'inactive';
+  isPublic?: boolean;
   connectionPool?: DataSourceConnectionPool;
   ssl?: DataSourceSSL;
   lastTestedAt?: string;
@@ -45,6 +46,7 @@ export interface DataSourceCreateParams {
   connectionPool?: DataSourceConnectionPool;
   ssl?: DataSourceSSL;
   status?: 'active' | 'inactive';
+  isPublic?: boolean;
 }
 
 export interface DataSourceUpdateParams {
@@ -58,6 +60,7 @@ export interface DataSourceUpdateParams {
   connectionPool?: DataSourceConnectionPool;
   ssl?: DataSourceSSL;
   status?: 'active' | 'inactive';
+  isPublic?: boolean;
 }
 
 export interface DataSourceListResponse {

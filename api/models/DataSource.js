@@ -35,7 +35,15 @@ async function createDataSource(dataSourceData) {
  */
 async function getDataSources(filter = {}) {
   try {
-    return await DataSource.find(filter).sort({ createdAt: -1 }).lean();
+    const dataSourceDocs = await DataSource.find(filter).sort({ createdAt: -1 });
+    const dataSources = dataSourceDocs.map(doc => {
+      const ds = doc.toObject ? doc.toObject() : doc;
+      return {
+        ...ds,
+        isPublic: ds.isPublic !== undefined ? Boolean(ds.isPublic) : false,
+      };
+    });
+    return dataSources;
   } catch (error) {
     logger.error('[getDataSources] Error:', error);
     throw error;
@@ -49,7 +57,15 @@ async function getDataSources(filter = {}) {
  */
 async function getDataSourceById(dataSourceId) {
   try {
-    return await DataSource.findById(dataSourceId).lean();
+    const dataSourceDoc = await DataSource.findById(dataSourceId);
+    if (!dataSourceDoc) {
+      return null;
+    }
+    const dataSource = dataSourceDoc.toObject ? dataSourceDoc.toObject() : dataSourceDoc;
+    return {
+      ...dataSource,
+      isPublic: dataSource.isPublic !== undefined ? Boolean(dataSource.isPublic) : false,
+    };
   } catch (error) {
     logger.error('[getDataSourceById] Error:', error);
     throw error;
@@ -64,11 +80,48 @@ async function getDataSourceById(dataSourceId) {
  */
 async function updateDataSource(dataSourceId, updateData) {
   try {
-    return await DataSource.findByIdAndUpdate(
-      dataSourceId,
-      { $set: updateData },
-      { new: true, runValidators: true },
-    ).lean();
+    const update = { $set: {} };
+    
+    // 复制所有更新字段到 $set
+    Object.keys(updateData).forEach(key => {
+      if (updateData[key] !== undefined && key !== 'name' && key !== 'createdBy') {
+        update.$set[key] = updateData[key];
+      }
+    });
+    
+    // 如果 isPublic 被明确设置，确保它被保存到数据库
+    if (updateData.isPublic !== undefined) {
+      update.$set.isPublic = Boolean(updateData.isPublic);
+    }
+    
+    // 使用原生 MongoDB updateOne 确保字段被正确保存
+    const mongoose = require('mongoose');
+    const result = await DataSource.collection.updateOne(
+      { _id: new mongoose.Types.ObjectId(dataSourceId) },
+      update,
+      { upsert: false }
+    );
+    
+    if (result.matchedCount === 0) {
+      return null;
+    }
+    
+    // 重新查询以确保获取最新的数据
+    const updatedDoc = await DataSource.findById(dataSourceId);
+    if (!updatedDoc) {
+      return null;
+    }
+    
+    const updated = updatedDoc.toObject ? updatedDoc.toObject() : updatedDoc;
+    
+    // 确保返回的数据包含 isPublic 字段（兼容旧数据）
+    if (updated.isPublic === undefined) {
+      updated.isPublic = false;
+    } else {
+      updated.isPublic = Boolean(updated.isPublic);
+    }
+    
+    return updated;
   } catch (error) {
     logger.error('[updateDataSource] Error:', error);
     throw error;

@@ -10,7 +10,7 @@ import {
   useTestDataSourceConnectionMutation,
 } from '~/data-provider/DataSources';
 import type { DataSource, DataSourceCreateParams } from '@because/data-provider';
-import { Plus, Edit, Trash2, TestTube, CheckCircle2, XCircle, Clock, Database } from 'lucide-react';
+import { Plus, Edit, Trash2, TestTube, CheckCircle2, XCircle, Clock, Database, Eye, EyeOff } from 'lucide-react';
 import DataSourceEditor from './DataSourceEditor';
 import SemanticModelConfig from './SemanticModelConfig';
 
@@ -119,6 +119,32 @@ export default function DataSourceManagement() {
         const next = new Set(prev);
         next.delete(id);
         return next;
+      });
+    }
+  };
+
+  const handleTogglePublic = async (e: React.MouseEvent, dataSource: DataSource) => {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    const newIsPublic = !(dataSource.isPublic ?? false);
+    
+    try {
+      await updateMutation.mutateAsync({
+        id: dataSource._id,
+        data: {
+          isPublic: newIsPublic,
+        },
+      });
+      
+      showToast({
+        message: newIsPublic ? '已展示数据源' : '已隐藏数据源',
+        status: 'success',
+      });
+    } catch (error) {
+      showToast({
+        message: `操作失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        status: 'error',
       });
     }
   };
@@ -242,6 +268,34 @@ export default function DataSourceManagement() {
                     )}
                   </div>
                   <div className="flex gap-2 ml-4">
+                    {/* 是否展示给用户 */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        if (!updateMutation.isLoading) {
+                          handleTogglePublic(e, dataSource);
+                        }
+                      }}
+                      disabled={updateMutation.isLoading}
+                      style={{ pointerEvents: updateMutation.isLoading ? 'none' : 'auto' }}
+                      className={cn(
+                        'rounded p-2 transition-colors relative z-10 cursor-pointer',
+                        (dataSource.isPublic ?? false)
+                          ? 'text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20'
+                          : 'text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800',
+                        updateMutation.isLoading && 'opacity-50 cursor-not-allowed',
+                      )}
+                      title={(dataSource.isPublic ?? false) ? '已展示给用户（点击隐藏）' : '未展示给用户（点击显示）'}
+                      aria-label={(dataSource.isPublic ?? false) ? '隐藏' : '显示'}
+                    >
+                      {(dataSource.isPublic ?? false) ? (
+                        <Eye className="h-5 w-5" />
+                      ) : (
+                        <EyeOff className="h-5 w-5" />
+                      )}
+                    </button>
                     <Button
                       onClick={() => setSemanticModelDataSourceId(dataSource._id)}
                       className="btn btn-neutral border-token-border-light relative flex items-center gap-2 rounded-lg px-3 py-2"

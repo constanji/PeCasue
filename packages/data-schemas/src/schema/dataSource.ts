@@ -90,6 +90,11 @@ const dataSourceSchema = new Schema<IDataSource>(
       default: 'active',
       index: true,
     },
+    isPublic: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     lastTestedAt: {
       type: Date,
     },

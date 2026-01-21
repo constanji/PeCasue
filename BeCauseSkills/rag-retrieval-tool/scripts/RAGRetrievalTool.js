@@ -259,14 +259,38 @@ class RAGRetrievalTool extends Tool {
 
       // 自动获取entityId（如果未提供）
       const finalEntityId = entity_id || await this.getEntityId(input);
-      logger.info('[RAGRetrievalTool] 最终entityId:', finalEntityId);
+      logger.info('[RAGRetrievalTool] 最终entityId:', finalEntityId, '类型:', typeof finalEntityId, 'input.entity_id:', entity_id);
+
+      // 确保entityId格式一致：如果是ObjectId，转换为字符串
+      let normalizedEntityId = finalEntityId;
+      if (finalEntityId && typeof finalEntityId === 'object' && finalEntityId.toString) {
+        normalizedEntityId = finalEntityId.toString();
+        logger.info('[RAGRetrievalTool] entityId已标准化为字符串:', normalizedEntityId);
+      } else if (typeof finalEntityId === 'string') {
+        normalizedEntityId = finalEntityId;
+        logger.info('[RAGRetrievalTool] entityId已是字符串格式:', normalizedEntityId);
+      } else if (finalEntityId) {
+        normalizedEntityId = String(finalEntityId);
+        logger.info('[RAGRetrievalTool] entityId转换为字符串:', normalizedEntityId);
+      } else {
+        logger.info('[RAGRetrievalTool] entityId为空，不进行数据源隔离');
+      }
+      
+      // 移除可能的JSON引号（如果entityId被错误地JSON.stringify了）
+      if (normalizedEntityId && typeof normalizedEntityId === 'string') {
+        if (normalizedEntityId.startsWith('"') && normalizedEntityId.endsWith('"')) {
+          const original = normalizedEntityId;
+          normalizedEntityId = normalizedEntityId.slice(1, -1);
+          logger.warn(`[RAGRetrievalTool] 检测到entityId包含引号，已移除: 原始="${original}", 处理后="${normalizedEntityId}"`);
+        }
+      }
 
       const ragResults = await this.retrieveKnowledge(query, userId, {
         types,
         topK: top_k,
         useReranking: use_reranking,
         enhancedReranking: enhanced_reranking,
-        entityId: finalEntityId,
+        entityId: normalizedEntityId,
         fileIds: file_ids,
       });
 

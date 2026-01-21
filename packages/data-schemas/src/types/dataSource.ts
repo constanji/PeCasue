@@ -28,6 +28,7 @@ export interface IDataSource extends Document {
   connectionPool?: IDataSourceConnectionPool;
   ssl?: IDataSourceSSL;
   status?: 'active' | 'inactive';
+  isPublic?: boolean;
   lastTestedAt?: Date;
   lastTestResult?: 'success' | 'failed';
   lastTestError?: string;

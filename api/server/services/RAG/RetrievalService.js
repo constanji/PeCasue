@@ -134,9 +134,14 @@ class RetrievalService {
                 if (!entry) return null;
 
                 // 双重检查确保entityId匹配
-                if (entityId && entry.metadata?.entity_id !== entityId) {
-                  logger.warn(`[RetrievalService] 发现entityId不匹配的条目: ${vectorResult.knowledgeEntryId}, 期望: ${entityId}, 实际: ${entry.metadata?.entity_id}`);
-                  return null;
+                if (entityId) {
+                  const entityIdStr = typeof entityId === 'string' ? entityId : String(entityId);
+                  const storedEntityIdStr = entry.metadata?.entity_id ? String(entry.metadata.entity_id) : null;
+
+                  if (storedEntityIdStr !== entityIdStr) {
+                    logger.warn(`[RetrievalService] 发现entityId不匹配的条目: ${vectorResult.knowledgeEntryId}, 期望: ${entityIdStr}, 实际: ${storedEntityIdStr}`);
+                    return null;
+                  }
                 }
 
                 return {
