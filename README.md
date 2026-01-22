@@ -115,31 +115,24 @@
     npm run build:dev     # 生成 dist/esm 和 dist/cjs
     ```
 
-4. **构建前端**
-   ```bash
-   cd client
-   npm run build
-   cd ..
-   ```
-
-5. **配置环境变量**
+4. **配置环境变量**
    ```bash
    cp .env.example .env
    cp Because.yaml.example Because.yaml
    # 按需编辑 .env，配置数据库、密钥等
    ```
 
-6. **启动后端（终端 1）**
+5. **启动后端（终端 1）**
    ```bash
    npm run backend:dev
    ```
 
-7. **启动前端（终端 2）**
+6. **启动前端（终端 2）**
    ```bash
    npm run frontend:dev
    ```
 
-8. **默认访问地址**
+7. **默认访问地址**
    - 开发前端：`http://localhost:3090`
    - 后端 API：`http://localhost:3080`
 

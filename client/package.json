@@ -1,5 +1,5 @@
 {
-  "name": "@aipyq/frontend",
+  "name": "@because/frontend",
   "version": "v0.8.1-rc2",
   "description": "",
   "type": "module",
@@ -27,7 +27,7 @@
   "bugs": {
     "url": "https://github.com/constanji/Because/issues"
   },
-  "homepage": "https://www.aipyq.com",
+  "homepage": "https://www.because.com",
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
     "@ant-design/x": "^2.1.1",
@@ -88,6 +88,7 @@
     "micromark-extension-llm-math": "^3.1.0",
     "qrcode.react": "^4.2.0",
     "rc-input-number": "^7.4.2",
+    "rc-motion": "^2.9.2",
     "react": "^18.2.0",
     "react-avatar-editor": "^13.0.2",
     "react-dnd": "^16.0.1",

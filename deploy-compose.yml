@@ -1,19 +1,15 @@
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+   # build:
+     # context: .
+     # dockerfile: Dockerfile
     image: because:latest  # 使用本地构建的镜像
     container_name: Because-API
     ports:
       - 4082:3080
     depends_on:
-      mongodb:
-        condition: service_healthy
-      # meilisearch:
-      #   condition: service_healthy
-      vectordb:
-        condition: service_healthy
+      - mongodb
+      # meilisearch:  # 已禁用MeiliSearch服务
       # RAG API 已本地化，使用 ONNX 模型，不再需要外部服务
       # - rag_api
     restart: always
@@ -27,14 +23,11 @@ services:
       - HOST=0.0.0.0
       - PORT=3080
       - NODE_ENV=production
-      - MONGO_URI=mongodb://mongodb:27017/BecauseAi
-      - MONGO_SERVER_SELECTION_TIMEOUT_MS=30000
-      - MONGO_CONNECT_TIMEOUT_MS=30000
-      - MONGO_SOCKET_TIMEOUT_MS=45000
-      # MeiliSearch 已禁用，以下配置不再需要
+      - MONGO_URI=mongodb://Because-MongoDB:27017/BecauseAi
+      # MeiliSearch 已禁用
       # - MEILI_HOST=http://meilisearch:7700
-      # - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-masterKey}
-      - SEARCH=false
+      # - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
+      # - SEARCH=true
       # RAG API 已本地化，使用 ONNX 模型，不再需要外部服务
       # - RAG_PORT=${RAG_PORT:-9002}
       # - RAG_API_URL=http://rag_api:8000
@@ -73,15 +66,8 @@ services:
       - because-network
     volumes:
       - ./data-node:/data/db
-    command: mongod --noauth --port 27017 --bind_ip_all
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-  # MeiliSearch 服务已禁用（搜索功能关闭）
-  # meilisearch:
+    command: mongod --noauth --bind_ip_all
+  # meilisearch:  # 已禁用MeiliSearch服务
   #   container_name: Because-Meilisearch
   #   image: getmeili/meilisearch:v1.12.3
   #   restart: always
@@ -93,16 +79,10 @@ services:
   #     - .env
   #   environment:
   #     - MEILI_HTTP_ADDR=0.0.0.0:7700
-  #     - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-masterKey}
+  #     - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
   #     - MEILI_NO_ANALYTICS=true
   #   volumes:
   #     - ./meili_data_v1.12:/meili_data
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -f http://localhost:7700/health || exit 1"]
-  #     interval: 5s
-  #     timeout: 3s
-  #     retries: 10
-  #     start_period: 10s
   vectordb:
     container_name: Because-VectorDB
     image: pgvector/pgvector:0.8.0-pg15-trixie
@@ -115,12 +95,6 @@ services:
       - because-network
     volumes:
       - pgdata2:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U myuser -d mydatabase"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
   # RAG API 服务已本地化，使用 ONNX 模型，不再需要外部服务
   # rag_api:
   #   container_name: Because-RAG-API

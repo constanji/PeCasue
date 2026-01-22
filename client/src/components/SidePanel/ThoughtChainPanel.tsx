@@ -456,7 +456,7 @@ function SidePanelToolCallItem({
   ];
 
   return (
-    <div className="w-full overflow-hidden" style={{ maxWidth: '100%' }}>
+    <div className="w-full overflow-hidden text-sm" style={{ maxWidth: '100%' }}>
       <ThoughtChain items={toolCallItems} />
     </div>
   );
@@ -640,11 +640,13 @@ const ThoughtChainPanel = memo(function ThoughtChainPanel({
         </div>
 
         {/* 思维链内容 */}
-        <div 
+        <div
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-2 thought-chain-container text-sm"
-          style={{ 
+          style={{
             // 思维链整体基准文字颜色用三级文字色，更浅一些
             color: 'var(--text-tertiary)',
+            // 使用与chat对话流一致的字体大小
+            fontSize: 'var(--markdown-font-size)',
           } as React.CSSProperties}
         >
           <style dangerouslySetInnerHTML={{ __html: `
