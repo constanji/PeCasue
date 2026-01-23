@@ -9,6 +9,7 @@ import EndpointsConfig from './EndpointsConfig';
 import UsersManagement from './UsersManagement';
 import FeaturesManagement from './FeaturesManagement';
 import AvailableToolsManagement from './AvailableToolsManagement';
+import PromptsManagement from './PromptsManagement';
 
 interface GlobalConfigContentProps {
   startupConfig?: TStartupConfig;
@@ -21,7 +22,8 @@ type TabType =
   | 'mcp'
   | 'availableTools'
   | 'users'
-  | 'features';
+  | 'features'
+  | 'prompts';
 
 const isValidTab = (tab: string | null): tab is TabType => {
   return (
@@ -31,7 +33,8 @@ const isValidTab = (tab: string | null): tab is TabType => {
     tab === 'mcp' ||
     tab === 'availableTools' ||
     tab === 'users' ||
-    tab === 'features'
+    tab === 'features' ||
+    tab === 'prompts'
   );
 };
 
@@ -86,6 +89,11 @@ export default function GlobalConfigContent({ startupConfig: propStartupConfig }
       id: 'features',
       label: '初始界面配置',
       description: '管理初始界面的欢迎语和模型',
+    },
+    {
+      id: 'prompts',
+      label: '提示集管理',
+      description: '管理初始对话界面中显示的提示集',
     },
   ];
 
@@ -144,6 +152,11 @@ export default function GlobalConfigContent({ startupConfig: propStartupConfig }
         {activeTab === 'features' && (
           <div className="h-full overflow-hidden px-4 py-4">
             <FeaturesManagement startupConfig={startupConfig} />
+          </div>
+        )}
+        {activeTab === 'prompts' && (
+          <div className="h-full overflow-hidden px-4 py-4">
+            <PromptsManagement startupConfig={startupConfig} />
           </div>
         )}
       </div>

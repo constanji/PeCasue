@@ -27,6 +27,7 @@ import { createAclEntryModel } from './aclEntry';
 import { createGroupModel } from './group';
 import { createKnowledgeBaseModel } from './knowledgeBase';
 import { createDataSourceModel } from './dataSource';
+import { createAgentPromptsConfigModel } from './agentPromptsConfig';
 
 /**
  * Creates all database models for all collections
@@ -62,5 +63,6 @@ export function createModels(mongoose: typeof import('mongoose')) {
     Group: createGroupModel(mongoose),
     KnowledgeEntry: createKnowledgeBaseModel(mongoose),
     DataSource: createDataSourceModel(mongoose),
+    AgentPromptsConfig: createAgentPromptsConfigModel(mongoose),
   };
 }

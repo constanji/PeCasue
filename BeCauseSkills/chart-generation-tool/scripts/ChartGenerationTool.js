@@ -148,6 +148,12 @@ class ChartGenerationTool extends Tool {
         y_axis,
       );
 
+      // 强制确保柱状图使用绿色
+      if (selectedChartType === 'bar' && chartConfig.data && chartConfig.data[0]) {
+        chartConfig.data[0].marker = chartConfig.data[0].marker || {};
+        chartConfig.data[0].marker.color = '#15a8a8';
+      }
+
       // 5. 构建返回结果
       const columns = Object.keys(cleanedData[0]);
       const result = {
@@ -155,7 +161,6 @@ class ChartGenerationTool extends Tool {
         chart: {
           type: 'plotly',
           data: chartConfig,
-          title: title,
           config: {
             data_shape: {
               rows: cleanedData.length,
@@ -189,18 +194,21 @@ class ChartGenerationTool extends Tool {
   <style>
     body {
       margin: 0;
-      padding: 20px;
+      padding: 0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
       background: #ffffff;
+      overflow: hidden;
     }
     #${chartId} {
       width: 100%;
-      height: 500px;
+      height: 480px;
+      max-height: 80vh;
+      margin: 0;
+      padding: 0;
     }
   </style>
 </head>
 <body>
-  <h2>${title}</h2>
   <div id="${chartId}"></div>
   <script>
     const chartData = ${JSON.stringify(chartConfig.data)};
@@ -229,7 +237,6 @@ class ChartGenerationTool extends Tool {
                 text: plotlyHtml,
                 mimeType: 'text/html',
                 chartId: chartId,
-                title: title,
               },
             ],
           },
@@ -238,7 +245,6 @@ class ChartGenerationTool extends Tool {
         _chartData: {
           marker: chartMarker,
           chartId: chartId,
-          title: title,
           data: chartConfig.data,
           layout: chartConfig.layout,
           // 注意：html 字段已移除，因为前端现在主要通过 artifact.ui_resources 来渲染

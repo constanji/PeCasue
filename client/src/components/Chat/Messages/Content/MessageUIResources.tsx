@@ -57,7 +57,8 @@ const MessageUIResources = memo(({ attachments, excludedToolCallIds }: MessageUI
             autoResizeIframe: { width: true, height: true },
             style: {
               width: '100%',
-              minHeight: '500px',
+              minHeight: '480px',
+              maxHeight: '80vh',
               border: 'none',
               borderRadius: '8px',
             }

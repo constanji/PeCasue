@@ -9,7 +9,10 @@ const { logger } = require('@because/data-schemas');
  */
 class ONNXRerankingService {
   constructor() {
-    this.modelPath = path.join(__dirname, 'onnx', 'reranker', 'resources');
+    // 使用符合 @xenova/transformers 期望的本地目录结构
+    // 路径: resources/Xenova/ms-marco-MiniLM-L-6-v2/
+    this.resourcesPath = path.join(__dirname, 'onnx', 'reranker', 'resources');
+    this.modelPath = path.join(this.resourcesPath, 'Xenova', 'ms-marco-MiniLM-L-6-v2');
     this.pipeline = null;
     this.initialized = false;
   }
@@ -23,9 +26,10 @@ class ONNXRerankingService {
     }
 
     try {
-      // 检查模型文件是否存在
-      const modelFile = path.join(this.modelPath, 'ms-marco-MiniLM-L6-v2.onnx');
-      const tokenizerFile = path.join(this.modelPath, 'ms-marco-MiniLM-L6-v2-tokenizer.json');
+      // 检查模型文件是否存在（使用新的目录结构）
+      const modelFile = path.join(this.modelPath, 'onnx', 'model_quantized.onnx');
+      const tokenizerFile = path.join(this.modelPath, 'tokenizer.json');
+      const configFile = path.join(this.modelPath, 'config.json');
 
       if (!fs.existsSync(modelFile)) {
         throw new Error(`ONNX reranker model not found at: ${modelFile}`);
@@ -33,6 +37,10 @@ class ONNXRerankingService {
 
       if (!fs.existsSync(tokenizerFile)) {
         throw new Error(`Tokenizer not found at: ${tokenizerFile}`);
+      }
+
+      if (!fs.existsSync(configFile)) {
+        throw new Error(`Config file not found at: ${configFile}`);
       }
 
       // 动态加载 @xenova/transformers
@@ -44,35 +52,112 @@ class ONNXRerankingService {
         throw new Error('@xenova/transformers is required for ONNX reranking. Install it with: npm install @xenova/transformers');
       }
 
-      // 配置 @xenova/transformers 环境
+      // 配置 @xenova/transformers 环境 - 强制离线模式
+      // 使用 transformers 的 env API 来禁用远程模型加载
+      const { env, pipeline } = transformers;
+      
+      // 保存原始配置
+      const originalAllowRemoteModels = env.allowRemoteModels;
+      const originalUseBrowserCache = env.useBrowserCache;
+      const originalCacheDir = env.cacheDir;
+      
+      // 强制离线模式：禁用所有远程模型加载
+      env.allowRemoteModels = false;
+      env.useBrowserCache = false;
+      
+      // 设置缓存目录为我们的 resources 目录
+      // transformers 会在 cacheDir/Xenova/ms-marco-MiniLM-L-6-v2/ 下查找模型
+      env.cacheDir = path.resolve(this.resourcesPath);
+      
       // 如果遇到 SSL 证书问题，允许使用不安全的连接（仅用于开发环境）
+      const originalTLSReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
       if (process.env.NODE_ENV === 'development' || process.env.ALLOW_INSECURE_SSL === 'true') {
-        // 注意：这会跳过 SSL 验证，仅用于开发环境
         process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
         logger.warn('[ONNXRerankingService] SSL verification disabled (development mode or ALLOW_INSECURE_SSL=true)');
       }
       
-      // 使用模型名称加载，@xenova/transformers 会自动处理缓存
-      const { pipeline } = transformers;
+      // 拦截全局 fetch，阻止所有网络请求（仅在模型加载期间）
+      const originalFetch = global.fetch;
+      let fetchIntercepted = false;
+      const resourcesPathResolved = path.resolve(this.resourcesPath);
+      
+      // 创建一个只允许本地文件访问的 fetch 拦截器
+      global.fetch = function(...args) {
+        const url = args[0];
+        const urlString = typeof url === 'string' ? url : url?.toString() || '';
+        
+        // 如果是本地文件路径（file:// 或绝对路径），允许访问
+        if (urlString.startsWith('file://') || 
+            (urlString.startsWith('/') && !urlString.startsWith('http')) ||
+            urlString.includes(resourcesPathResolved)) {
+          return originalFetch.apply(this, args);
+        }
+        
+        // 阻止所有 HTTP/HTTPS 网络请求
+        if (urlString.startsWith('http://') || urlString.startsWith('https://')) {
+          logger.warn(`[ONNXRerankingService] Blocked network request: ${urlString}`);
+          return Promise.reject(new Error(`Network requests are disabled in offline mode. Attempted to fetch: ${urlString}`));
+        }
+        
+        // 允许其他类型的请求（可能是本地文件系统操作）
+        return originalFetch.apply(this, args);
+      };
+      
+      fetchIntercepted = true;
+      
+      // 使用模型名称（不是绝对路径），transformers 会在 cacheDir 下查找
       const modelName = 'Xenova/ms-marco-MiniLM-L-6-v2';
       
       logger.info(`[ONNXRerankingService] Loading model: ${modelName}`);
-      logger.info(`[ONNXRerankingService] Note: First run will download config/tokenizer files, subsequent runs will use cache`);
+      logger.info(`[ONNXRerankingService] Cache directory: ${env.cacheDir}`);
+      logger.info(`[ONNXRerankingService] Allow remote models: ${env.allowRemoteModels}`);
+      logger.info(`[ONNXRerankingService] Force offline mode - network requests intercepted`);
 
-      // 创建文本分类 pipeline（用于重排序）
-      // 重排序模型通常使用 cross-encoder 架构
-      this.pipeline = await pipeline(
-        'text-classification',
-        modelName,
-        {
-          quantized: true,
-          device: 'cpu', // 使用 CPU，也可以使用 'gpu' 如果有 GPU
+      try {
+        // 创建文本分类 pipeline（用于重排序）
+        // 重排序模型通常使用 cross-encoder 架构
+        // 使用模型名称，transformers 会在 cacheDir/Xenova/ms-marco-MiniLM-L-6-v2/ 下查找
+        // fetch 拦截器会阻止任何网络请求
+        this.pipeline = await pipeline(
+          'text-classification',
+          modelName,
+          {
+            quantized: true,
+            device: 'cpu', // 使用 CPU，也可以使用 'gpu' 如果有 GPU
+          }
+        );
+      } catch (error) {
+        logger.error(`[ONNXRerankingService] Failed to load model: ${error.message}`);
+        throw new Error(`Failed to load ONNX reranker model: ${error.message}`);
+      } finally {
+        // 恢复全局 fetch
+        if (fetchIntercepted) {
+          global.fetch = originalFetch;
         }
-      );
-      
-      // 恢复 SSL 验证（如果之前禁用了）
-      if (process.env.NODE_ENV === 'development' || process.env.ALLOW_INSECURE_SSL === 'true') {
-        delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        
+        // 恢复 transformers 配置
+        if (originalAllowRemoteModels !== undefined) {
+          env.allowRemoteModels = originalAllowRemoteModels;
+        } else {
+          env.allowRemoteModels = true; // 恢复默认值
+        }
+        
+        if (originalUseBrowserCache !== undefined) {
+          env.useBrowserCache = originalUseBrowserCache;
+        }
+        
+        if (originalCacheDir !== undefined) {
+          env.cacheDir = originalCacheDir;
+        } else {
+          delete env.cacheDir;
+        }
+        
+        // 恢复 SSL 验证（如果之前禁用了）
+        if (originalTLSReject !== undefined) {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalTLSReject;
+        } else {
+          delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        }
       }
 
       this.initialized = true;

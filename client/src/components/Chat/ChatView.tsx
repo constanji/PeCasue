@@ -16,6 +16,7 @@ import ChatForm from './Input/ChatForm';
 import Landing from './Landing';
 import Header from './Header';
 import Footer from './Footer';
+import AgentPrompts from './AgentPrompts';
 import { cn } from '~/utils';
 import store from '~/store';
 
@@ -117,6 +118,8 @@ function ChatView({ index = 0 }: { index?: number }) {
                       isLandingPage && 'max-w-3xl transition-all duration-200 xl:max-w-4xl',
                     )}
                   >
+                    {/* 在输入框上方显示提示集 */}
+                    {isLandingPage && <AgentPrompts />}
                     <ChatForm index={index} />
                     {isLandingPage ? <ConversationStarters /> : <div className="2"><Footer className="relative left-0 right-0 hidden items-center justify-center gap-2 px-2 py-2 text-center text-sm text-text-primary sm:flex md:px-[60px]" /></div>}
                   </div>

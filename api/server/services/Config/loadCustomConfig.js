@@ -140,6 +140,13 @@ https://because.ai/docs/configuration/stt_tts`);
     customConfig.modelSpecs = result.data.modelSpecs;
   }
 
+  // agentPrompts 配置已迁移到数据库，不再从 YAML 文件加载
+  // 如果 YAML 文件中还有 agentPrompts，移除它以避免混淆
+  if (customConfig.agentPrompts) {
+    delete customConfig.agentPrompts;
+    logger.info('[loadCustomConfig] Removed agentPrompts from YAML config (now stored in database)');
+  }
+
   // 确保 interface 配置从 result.data 中获取（验证后的数据），而不是原始 customConfig
   // 这样可以确保所有字段都符合 schema
   // 特别保留 defaultEndpoint 和 defaultModel，因为它们可能在 schema 验证时被移除

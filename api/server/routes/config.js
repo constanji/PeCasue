@@ -28,6 +28,10 @@ const {
   deleteCustomMCPServersConfig,
 } = require('~/server/controllers/MCPConfigController');
 const {
+  getAgentPromptsConfig,
+  saveAgentPromptsConfig,
+} = require('~/server/controllers/AgentPromptsController');
+const {
   getDataSourcesHandler,
   getDataSourceHandler,
   createDataSourceHandler,
@@ -222,6 +226,30 @@ router.get('/', async function (req, res) {
       payload.customFooter = process.env.CUSTOM_FOOTER;
     }
 
+    // 从数据库加载 agentPrompts 配置
+    try {
+      const models = require('~/db/models');
+      const { AgentPromptsConfig } = models;
+      if (AgentPromptsConfig) {
+        const agentPromptsConfig = await AgentPromptsConfig.findOne({ configId: 'default' }).lean();
+        if (agentPromptsConfig) {
+          const { _id, configId, ...agentPrompts } = agentPromptsConfig;
+          logger.info('[startup config] Loaded agentPrompts from database:', JSON.stringify(agentPrompts, null, 2));
+          payload.agentPrompts = agentPrompts;
+        } else {
+          logger.info('[startup config] No agentPrompts config found in database');
+        }
+      } else {
+        logger.warn('AgentPromptsConfig model not found, available models:', Object.keys(models));
+      }
+    } catch (error) {
+      logger.warn('Error loading agentPrompts config from database', error);
+      // 如果数据库加载失败，尝试从 YAML 文件加载（向后兼容）
+      if (appConfig?.config?.agentPrompts) {
+        payload.agentPrompts = appConfig.config.agentPrompts;
+      }
+    }
+
     await cache.set(CacheKeys.STARTUP_CONFIG, payload);
     await getMCPServers(payload, appConfig);
     return res.status(200).send(payload);
@@ -246,6 +274,10 @@ router.delete('/endpoints/custom/:endpointName', requireJwtAuth, checkAdmin, del
 router.get('/mcp/custom', requireJwtAuth, checkAdmin, getCustomMCPServersConfig);
 router.post('/mcp/custom', requireJwtAuth, checkAdmin, saveCustomMCPServersConfig);
 router.delete('/mcp/custom/:serverName', requireJwtAuth, checkAdmin, deleteCustomMCPServersConfig);
+
+// 智能体提示集配置路由（需要管理员权限）
+router.get('/agent-prompts', requireJwtAuth, checkAdmin, getAgentPromptsConfig);
+router.post('/agent-prompts', requireJwtAuth, checkAdmin, saveAgentPromptsConfig);
 
 // 数据源配置路由
 // GET 接口：所有已认证用户都可以访问，但普通用户只能看到公开的数据源
