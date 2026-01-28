@@ -8,6 +8,7 @@ import MCPManagement from './MCPManagement';
 import EndpointsConfig from './EndpointsConfig';
 import UsersManagement from './UsersManagement';
 import FeaturesManagement from './FeaturesManagement';
+import MarketplaceContent from './MarketplaceContent';
 import AvailableToolsManagement from './AvailableToolsManagement';
 import PromptsManagement from './PromptsManagement';
 
@@ -71,6 +72,11 @@ export default function GlobalConfigContent({ startupConfig: propStartupConfig }
       description: '管理所有智能体，设置是否展示给用户',
     },
     {
+      id: 'marketplace',
+      label: '智能体市场',
+      description: '浏览和发现智能体',
+    },
+    {
       id: 'availableTools',
       label: '可用工具',
       description: '查看当前已注册的工具列表',
@@ -132,6 +138,11 @@ export default function GlobalConfigContent({ startupConfig: propStartupConfig }
         {activeTab === 'agents' && (
           <div className="h-full overflow-hidden px-4 py-4">
             <AgentsManagement />
+          </div>
+        )}
+        {activeTab === 'marketplace' && (
+          <div className="h-full overflow-hidden">
+            <MarketplaceContent />
           </div>
         )}
         {activeTab === 'availableTools' && (

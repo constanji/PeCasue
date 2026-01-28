@@ -40,7 +40,7 @@ const AgentGrid: React.FC<AgentGridProps> = ({
       promoted?: 0 | 1;
     } = {
       requiredPermission: PermissionBits.VIEW, // View permission for marketplace viewing
-      limit: 6,
+      limit: 15, // Increased limit to match table view and ensure all agents are loaded
     };
 
     // Handle search
@@ -89,13 +89,35 @@ const AgentGrid: React.FC<AgentGridProps> = ({
     hasNextPage,
     isLoading: isFetching || isFetchingNextPage,
     fetchNextPage: () => {
-      if (hasNextPage && !isFetching) {
+      if (hasNextPage && !isFetching && !isFetchingNextPage) {
         fetchNextPage();
       }
     },
     threshold: 0.8, // Trigger when 80% scrolled
     throttleMs: 200,
   });
+
+  // Auto-fetch next page if content is not tall enough to trigger scroll
+  useEffect(() => {
+    if (!scrollElementRef?.current || isLoading || isFetching || isFetchingNextPage) {
+      return;
+    }
+
+    const scrollElement = scrollElementRef.current;
+    const { scrollHeight, clientHeight } = scrollElement;
+    
+    // If content doesn't fill the container and there's more data, fetch next page
+    if (scrollHeight <= clientHeight && hasNextPage && currentAgents.length > 0) {
+      // Use a small delay to avoid race conditions
+      const timer = setTimeout(() => {
+        if (hasNextPage && !isFetching && !isFetchingNextPage) {
+          fetchNextPage();
+        }
+      }, 100);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [scrollElementRef, hasNextPage, isLoading, isFetching, isFetchingNextPage, currentAgents.length, fetchNextPage]);
 
   // Connect the scroll element when it's provided
   useEffect(() => {
