@@ -15,16 +15,39 @@ class ONNXEmbeddingService {
     this.modelPath = path.join(this.resourcesPath, 'Xenova', 'bge-small-zh-v1.5');
     this.pipeline = null;
     this.initialized = false;
+    this.initializing = false; // 添加初始化锁，防止并发初始化
+    this.initPromise = null; // 保存初始化 Promise，供并发调用共享
   }
 
   /**
    * 初始化 ONNX 模型和 tokenizer
    */
   async initialize() {
+    // 如果已经初始化，直接返回
     if (this.initialized) {
       return;
     }
 
+    // 如果正在初始化，等待现有的初始化完成
+    if (this.initializing && this.initPromise) {
+      return await this.initPromise;
+    }
+
+    // 开始初始化，设置锁和 Promise
+    this.initializing = true;
+    this.initPromise = this._doInitialize();
+    
+    try {
+      await this.initPromise;
+    } finally {
+      this.initializing = false;
+    }
+  }
+
+  /**
+   * 实际执行初始化的私有方法
+   */
+  async _doInitialize() {
     try {
       // 检查模型文件是否存在（使用新的目录结构）
       const modelFile = path.join(this.modelPath, 'onnx', 'model_quantized.onnx');
@@ -100,12 +123,14 @@ class ONNXEmbeddingService {
         logger.warn('[ONNXEmbeddingService] SSL verification disabled (development mode or ALLOW_INSECURE_SSL=true)');
       }
       
-      // 拦截全局 fetch，阻止所有网络请求（仅在模型加载期间）
+      // 拦截全局 fetch，但只拦截 transformers 相关的请求
+      // 使用更精确的拦截策略，避免影响其他 LLM 请求
       const originalFetch = global.fetch;
       let fetchIntercepted = false;
       const resourcesPathResolved = path.resolve(this.resourcesPath);
       
-      // 创建一个只允许本地文件访问的 fetch 拦截器
+      // 创建一个只拦截 transformers 相关请求的 fetch 拦截器
+      // 只拦截可能来自 @xenova/transformers 的请求（huggingface.co, transformers 相关域名）
       global.fetch = function(...args) {
         const url = args[0];
         const urlString = typeof url === 'string' ? url : url?.toString() || '';
@@ -117,13 +142,20 @@ class ONNXEmbeddingService {
           return originalFetch.apply(this, args);
         }
         
-        // 阻止所有 HTTP/HTTPS 网络请求
-        if (urlString.startsWith('http://') || urlString.startsWith('https://')) {
-          logger.warn(`[ONNXEmbeddingService] Blocked network request: ${urlString}`);
-          return Promise.reject(new Error(`Network requests are disabled in offline mode. Attempted to fetch: ${urlString}`));
+        // 只拦截 transformers 相关的网络请求（huggingface.co 等）
+        // 不拦截其他 LLM API 请求（如 deepseek.com, openai.com 等）
+        const isTransformersRequest = 
+          urlString.includes('huggingface.co') ||
+          urlString.includes('transformers') ||
+          urlString.includes('hf.co') ||
+          (urlString.startsWith('https://') && urlString.match(/\/models\/|\/api\/models\//));
+        
+        if (isTransformersRequest) {
+          logger.warn(`[ONNXEmbeddingService] Blocked transformers network request: ${urlString}`);
+          return Promise.reject(new Error(`Transformers network requests are disabled in offline mode. Attempted to fetch: ${urlString}`));
         }
         
-        // 允许其他类型的请求（可能是本地文件系统操作）
+        // 允许其他所有 HTTP/HTTPS 请求（包括 LLM API 调用）
         return originalFetch.apply(this, args);
       };
       
@@ -182,6 +214,7 @@ class ONNXEmbeddingService {
 
       this.initialized = true;
       logger.info('[ONNXEmbeddingService] ONNX embedding model initialized successfully');
+      return;
     } catch (error) {
       logger.error('[ONNXEmbeddingService] Failed to initialize ONNX model:', error);
       throw error;
@@ -194,6 +227,7 @@ class ONNXEmbeddingService {
    * @returns {Promise<number[]>} 向量嵌入数组
    */
   async embedText(text) {
+    // 确保初始化完成（处理并发情况）
     if (!this.initialized) {
       await this.initialize();
     }

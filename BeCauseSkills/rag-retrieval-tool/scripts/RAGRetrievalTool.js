@@ -187,6 +187,37 @@ class RAGRetrievalTool extends Tool {
   }
 
   /**
+   * 检测是否处于离线模式（没有可用的 LLM API key）
+   * @returns {boolean} 如果处于离线模式返回 true
+   */
+  isOfflineMode() {
+    // 检查常见的 LLM API keys
+    const hasOpenAIKey = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim() !== '');
+    const hasAnthropicKey = !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim() !== '');
+    const hasAzureKey = !!(process.env.AZURE_API_KEY && process.env.AZURE_API_KEY.trim() !== '');
+    const hasGoogleKey = !!(process.env.GOOGLE_KEY && process.env.GOOGLE_KEY.trim() !== '');
+    
+    // 检查是否有显式的离线模式配置
+    const forceOffline = process.env.FORCE_OFFLINE_MODE === 'true' || 
+                         process.env.RAG_OFFLINE_MODE === 'true';
+    
+    // 如果显式配置了离线模式，直接返回 true
+    if (forceOffline) {
+      logger.info('[RAGRetrievalTool] 检测到显式离线模式配置');
+      return true;
+    }
+    
+    // 如果没有任何 LLM API key，认为处于离线模式
+    const isOffline = !hasOpenAIKey && !hasAnthropicKey && !hasAzureKey && !hasGoogleKey;
+    
+    if (isOffline) {
+      logger.info('[RAGRetrievalTool] 检测到离线模式：未配置任何 LLM API key');
+    }
+    
+    return isOffline;
+  }
+
+  /**
    * 按类型组织检索结果
    */
   organizeResultsByType(results) {
@@ -293,6 +324,41 @@ class RAGRetrievalTool extends Tool {
         entityId: normalizedEntityId,
         fileIds: file_ids,
       });
+
+      // 检查检索结果是否为空
+      const hasResults = ragResults.results && ragResults.results.length > 0;
+      const isOffline = this.isOfflineMode();
+
+      // 关键修复：如果检索结果为 0 且处于离线模式，返回明确的错误消息
+      // 避免 Agent 继续调用 LLM（会被拦截导致卡住）
+      if (!hasResults && isOffline) {
+        const errorMessage = {
+          query: ragResults.query,
+          results: [],
+          total: 0,
+          error: 'RAG检索未找到相关知识，且系统处于离线模式（无可用LLM），无法生成回答。',
+          error_type: 'OFFLINE_MODE_NO_RESULTS',
+          suggestions: [
+            '请检查entityId是否正确（当前entityId: ' + (normalizedEntityId || '未指定') + '）',
+            '确认知识库中是否有对应entityId的数据',
+            '或者配置LLM API key以启用在线模式',
+          ],
+          metadata: {
+            retrieval_count: 0,
+            reranked: false,
+            enhanced_reranking: false,
+            entity_id: normalizedEntityId || null,
+            offline_mode: true,
+          },
+        };
+
+        logger.warn('[RAGRetrievalTool] 检索结果为0且处于离线模式，返回错误消息避免Agent卡住:', {
+          entityId: normalizedEntityId,
+          offlineMode: true,
+        });
+
+        return JSON.stringify(errorMessage, null, 2);
+      }
 
       // 按类型组织结果（可选，便于使用）
       const organizedResults = this.organizeResultsByType(ragResults.results);
