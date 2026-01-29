@@ -118,19 +118,29 @@ async function verifySetup() {
     }
   }
 
-  // 3. 验证文件解析支持
   console.log('\n3️⃣ 文件类型支持:');
   console.log('   ✅ 纯文本文件 (.txt, .md, .json, .csv, .html, .xml, .log 等)');
   console.log('   ✅ 代码文件 (.js, .ts, .py, .java, .cpp, .c, .php, .rb 等)');
   console.log('   ✅ 配置文件 (.yaml, .yml, .toml, .ini, .conf 等)');
   
+  // 检查 @langchain/community 是否已安装（用于 PDF 解析）
+  let pdfLoaderAvailable = false;
+  try {
+    require.resolve('@langchain/community/document_loaders/fs/pdf');
+    pdfLoaderAvailable = true;
+    console.log('   ✅ PDF 文件 (本地解析，使用 LangChain PDFLoader)');
+  } catch (e) {
+    warnings.push('@langchain/community 未安装，PDF 文件无法本地解析');
+    console.log('   ⚠️  PDF 文件 (需要安装 @langchain/community: npm install @langchain/community)');
+  }
+  
   if (process.env.RAG_API_URL) {
-    console.log('   ✅ PDF/Word/Excel (通过外部 RAG API)');
+    console.log('   ✅ Word/Excel (通过外部 RAG API)');
     console.log(`   📍 RAG_API_URL: ${process.env.RAG_API_URL}`);
   } else {
-    warnings.push('未配置 RAG_API_URL，PDF/Word/Excel 文件可能无法解析');
-    console.log('   ⚠️  PDF/Word/Excel (需要配置 RAG_API_URL)');
-    console.log('   💡 本地 parseTextNative 仅支持纯文本文件');
+    warnings.push('未配置 RAG_API_URL，Word/Excel 文件可能无法解析');
+    console.log('   ⚠️  Word/Excel (需要配置 RAG_API_URL)');
+    console.log('   💡 Word/Excel 等复杂格式需要外部 RAG API 支持');
   }
 
   // 4. 验证配置参数

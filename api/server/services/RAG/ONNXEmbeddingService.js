@@ -46,10 +46,31 @@ class ONNXEmbeddingService {
       // 动态加载 @xenova/transformers
       let transformers;
       try {
+        // 先检查模块是否存在
+        const modulePath = require.resolve('@xenova/transformers');
+        logger.debug(`[ONNXEmbeddingService] Found @xenova/transformers at: ${modulePath}`);
+        
+        // 尝试加载模块
         transformers = require('@xenova/transformers');
+        logger.debug('[ONNXEmbeddingService] Successfully loaded @xenova/transformers');
       } catch (error) {
-        logger.error('@xenova/transformers not found. Please install it: npm install @xenova/transformers');
-        throw new Error('@xenova/transformers is required for ONNX embedding. Install it with: npm install @xenova/transformers');
+        // 输出详细的错误信息以便调试
+        logger.error('[ONNXEmbeddingService] Failed to load @xenova/transformers:', {
+          message: error.message,
+          code: error.code,
+          stack: error.stack,
+          cwd: process.cwd(),
+          nodePath: process.env.NODE_PATH,
+        });
+        
+        // 检查是否是模块未找到错误
+        if (error.code === 'MODULE_NOT_FOUND') {
+          logger.error('@xenova/transformers not found. Please install it: npm install @xenova/transformers');
+          throw new Error('@xenova/transformers is required for ONNX embedding. Install it with: npm install @xenova/transformers');
+        }
+        
+        // 其他错误也抛出
+        throw new Error(`Failed to load @xenova/transformers: ${error.message}`);
       }
 
       // 配置 @xenova/transformers 环境 - 强制离线模式

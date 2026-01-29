@@ -1,4 +1,5 @@
 const sharp = require('sharp');
+const { logger } = require('@because/data-schemas');
 
 /**
  * Determines the file type of a buffer
@@ -64,4 +65,28 @@ const cleanFileName = (fileName) => {
   return cleaned;
 };
 
-module.exports = { determineFileType, getBufferMetadata, cleanFileName };
+/**
+ * 修复文件名编码问题
+ * Node.js multer 经常将 UTF-8 文件名错误地按 Latin1 解码
+ * 这个函数将 Latin1 编码的字符串重新解码为 UTF-8
+ * 
+ * @param {string} name - 可能被错误解码的文件名
+ * @returns {string} 修复后的文件名
+ */
+function fixFilenameEncoding(name) {
+  if (!name || typeof name !== 'string') {
+    return name || '';
+  }
+
+  try {
+    // 尝试将 Latin1 编码的字符串重新解码为 UTF-8
+    // 这是 Node.js multer 的常见问题：UTF-8 文件名被当成 Latin1 读取
+    return Buffer.from(name, 'latin1').toString('utf8');
+  } catch (error) {
+    // 如果转换失败，返回原始名称
+    logger.warn(`[fixFilenameEncoding] 文件名编码修复失败: ${name}`, error.message);
+    return name;
+  }
+}
+
+module.exports = { determineFileType, getBufferMetadata, cleanFileName, fixFilenameEncoding };

@@ -104,6 +104,81 @@ export async function parseTextNative(file: Express.Multer.File): Promise<{
     throw new Error('文件对象无效：缺少文件路径');
   }
 
+  // 如果是PDF文件，尝试使用PDF解析服务
+  // 注意：PDF文件的详细解析（包括分块和metadata）主要在 uploadVectorsLocal 函数中处理
+  // 这里只做基本的文本提取，用于非向量化场景
+  if (file.mimetype === 'application/pdf' || file.originalname?.toLowerCase().endsWith('.pdf')) {
+    try {
+
+      let PDFParseService;
+      try {
+        PDFParseService = require('~/server/services/RAG/PDFParseService');
+      } catch (e) {
+        const path = require('path');
+        const serverPath = path.resolve(process.cwd(), 'api/server');
+        PDFParseService = require(path.join(serverPath, 'services/RAG/PDFParseService'));
+      }
+      
+      const pdfService = new PDFParseService();
+      await pdfService.initialize();
+
+      // 解析PDF
+      const parseResult = await pdfService.parseTextPDF(file.path);
+      
+      logger.info(`[parseTextNative] PDF解析成功: ${parseResult.pages} 页, ${parseResult.text.length} 字符`);
+
+      return {
+        text: parseResult.text,
+        bytes: Buffer.byteLength(parseResult.text, 'utf8'),
+        source: FileSources.text,
+      };
+    } catch (pdfError) {
+      logger.warn('[parseTextNative] PDF解析失败:', pdfError.message);
+      // 如果PDF解析失败，抛出错误（PDF文件不能直接作为文本读取）
+      throw new Error(`PDF解析失败: ${pdfError.message}`);
+    }
+  }
+
+  // 如果是Word文件，尝试使用Word解析服务
+  // 注意：Word文件的详细解析（包括分块和metadata）主要在 uploadVectorsLocal 函数中处理
+  // 这里只做基本的文本提取，用于非向量化场景
+  const isWord = file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+                 file.mimetype === 'application/msword' ||
+                 file.originalname?.toLowerCase().endsWith('.docx') ||
+                 file.originalname?.toLowerCase().endsWith('.doc');
+  
+  if (isWord) {
+    try {
+      let WordParseService;
+      try {
+        WordParseService = require('~/server/services/RAG/WordParseService');
+      } catch (e) {
+        const path = require('path');
+        const serverPath = path.resolve(process.cwd(), 'api/server');
+        WordParseService = require(path.join(serverPath, 'services/RAG/WordParseService'));
+      }
+      
+      const wordService = new WordParseService();
+      await wordService.initialize();
+
+      // 解析Word文档
+      const parseResult = await wordService.parseWord(file.path);
+      
+      logger.info(`[parseTextNative] Word解析成功: ${parseResult.text.length} 字符`);
+
+      return {
+        text: parseResult.text,
+        bytes: Buffer.byteLength(parseResult.text, 'utf8'),
+        source: FileSources.text,
+      };
+    } catch (wordError) {
+      logger.warn('[parseTextNative] Word解析失败:', wordError.message);
+      // 如果Word解析失败，抛出错误（Word文件不能直接作为文本读取）
+      throw new Error(`Word解析失败: ${wordError.message}`);
+    }
+  }
+
+
   try {
     const { content: text, bytes } = await readFileAsString(file.path, {
       fileSize: file.size,

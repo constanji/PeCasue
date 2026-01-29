@@ -4,6 +4,7 @@ const FormData = require('form-data');
 const { logger } = require('@because/data-schemas');
 const { FileSources } = require('@because/data-provider');
 const { logAxiosError, generateShortLivedToken, parseText } = require('@because/api');
+const { fixFilenameEncoding } = require('~/server/utils/files');
 
 // 配置参数（可通过环境变量覆盖）
 const CHUNK_SIZE = parseInt(process.env.RAG_CHUNK_SIZE || '1500', 10);
@@ -27,7 +28,7 @@ const deleteVectors = async (req, file) => {
     return;
   }
 
-  // 如果配置了 RAG_API_URL，使用外部服务删除
+
   if (process.env.RAG_API_URL) {
     try {
       const jwtToken = generateShortLivedToken(req.user.id);
@@ -51,9 +52,9 @@ const deleteVectors = async (req, file) => {
         (error.response.status < 200 || error.response.status >= 300)
       ) {
         logger.warn('Error deleting vectors from RAG API, trying local deletion');
-        // 如果外部服务失败，尝试本地删除
+
       } else {
-        return; // 404 或其他非错误状态，直接返回
+        return; 
       }
     }
   }
@@ -216,10 +217,12 @@ function splitTextIntoChunks(text, chunkSize = CHUNK_SIZE, chunkOverlap = CHUNK_
 async function processChunksInBatches({
   chunks,
   embeddings,
+  chunkMetadataList = [], //可选的chunk metadata列表
   file_id,
   userId,
   entity_id,
   file,
+  fixedFilename, // 修复后文件名
   storageMetadata,
   pool,
   embeddingService,
@@ -240,6 +243,7 @@ async function processChunksInBatches({
       const endIdx = Math.min(startIdx + batchSize, totalChunks);
       const batchChunks = chunks.slice(startIdx, endIdx);
       const batchEmbeddings = embeddings.slice(startIdx, endIdx);
+      const batchMetadata = chunkMetadataList.slice(startIdx, endIdx);
 
       logger.info(
         `[uploadVectorsLocal] 处理批次 ${batchIdx + 1}/${numBatches}: 块 ${startIdx}-${endIdx - 1}`
@@ -249,11 +253,28 @@ async function processChunksInBatches({
       const insertPromises = batchChunks.map((chunk, idx) => {
         const globalIdx = startIdx + idx;
         const embeddingStr = `[${batchEmbeddings[idx].join(',')}]`;
-        const metadata = {
+        if (chunk.includes('\u0000')) {
+          logger.warn(`[processChunksInBatches] 检测到 NUL 字符，正在清理: chunk_index=${globalIdx}`);
+          chunk = chunk.replace(/\u0000/g, '');
+        }
+        
+        // 合并基础metadata和chunk-specific metadata
+        const baseMetadata = {
           entity_id: entity_id || null,
-          filename: file.originalname,
+          filename: fixedFilename, 
           mimetype: file.mimetype,
           ...(storageMetadata || {}),
+        };
+        
+        // 如果有chunk-specific metadata，合并它
+        const chunkMetadata = batchMetadata && batchMetadata[idx] 
+          ? batchMetadata[idx] 
+          : { chunk_index: globalIdx };
+        
+        const metadata = {
+          ...baseMetadata,
+          ...chunkMetadata,
+          chunk_index: globalIdx, // 确保chunk_index是全局索引
         };
 
         return pool.query(
@@ -321,23 +342,116 @@ async function uploadVectorsLocal({ req, file, file_id, entity_id, storageMetada
       throw new Error(`文件不存在: ${file.path}`);
     }
     
-    logger.info(`[uploadVectorsLocal] 开始解析文件: ${file.originalname} (路径: ${file.path})`);
+    // 🔥 修复文件名编码问题（Latin1 → UTF-8）
+    const fixedFilename = fixFilenameEncoding(file.originalname);
+    logger.info(`[uploadVectorsLocal] 开始解析文件: ${fixedFilename} (路径: ${file.path})`);
     
-    // 1. 解析文件文本
-    const { text, bytes } = await parseText({ req, file, file_id: file_id });
+    // 1. 解析文件文本（如果是PDF或Word，使用专用解析服务）
+    let chunks = [];
+    let chunkMetadataList = []; // 存储每个块的metadata
+    const isPDF = file.mimetype === 'application/pdf' || fixedFilename?.toLowerCase().endsWith('.pdf');
+    const isWord = file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+                   file.mimetype === 'application/msword' ||
+                   fixedFilename?.toLowerCase().endsWith('.docx') ||
+                   fixedFilename?.toLowerCase().endsWith('.doc');
+    
+    if (isPDF) {
+      // 使用PDFParseService解析PDF
+      try {
+        const PDFParseService = require('../../RAG/PDFParseService');
+        const pdfService = new PDFParseService();
+        await pdfService.initialize();
+        
+        logger.info(`[uploadVectorsLocal] 使用PDFParseService解析PDF文件`);
+        const pdfChunks = await pdfService.parsePDF(file.path, {
+          chunkSize: CHUNK_SIZE,
+          chunkOverlap: CHUNK_OVERLAP,
+          fileMetadata: {
+            file_id: file_id,
+            filename: fixedFilename, // 使用修复后的文件名
+            mimetype: file.mimetype,
+          },
+        });
+        
+        // 提取文本和metadata
+        chunks = pdfChunks.map(chunk => chunk.text);
+        chunkMetadataList = pdfChunks.map(chunk => chunk.metadata);
+        
+        logger.info(`[uploadVectorsLocal] PDF解析成功: ${pdfChunks.length} 个块`);
+      } catch (pdfError) {
+        logger.warn(`[uploadVectorsLocal] PDF解析失败，回退到普通文本解析: ${pdfError.message}`);
+        // 回退到普通文本解析
+        const { text, bytes } = await parseText({ req, file, file_id: file_id });
+        if (!text || text.trim().length === 0) {
+          throw new Error('文件解析后没有文本内容');
+        }
+        chunks = splitTextIntoChunks(text, CHUNK_SIZE, CHUNK_OVERLAP);
+        // 为普通文本文件创建默认metadata
+        chunkMetadataList = chunks.map((_, idx) => ({
+          chunk_index: idx,
+          source: 'text',
+        }));
+        logger.info(`[uploadVectorsLocal] 文件已分块: ${chunks.length} 个块`);
+      }
+    } else if (isWord) {
+      // 使用WordParseService解析Word文档
+      try {
+        const WordParseService = require('../../RAG/WordParseService');
+        const wordService = new WordParseService();
+        await wordService.initialize();
+        
+        logger.info(`[uploadVectorsLocal] 使用WordParseService解析Word文件`);
+        const wordChunks = await wordService.parseWordDocument(file.path, {
+          chunkSize: CHUNK_SIZE,
+          chunkOverlap: CHUNK_OVERLAP,
+          fileMetadata: {
+            file_id: file_id,
+            filename: fixedFilename, // 使用修复后的文件名
+            mimetype: file.mimetype,
+          },
+        });
+        
+        // 提取文本和metadata
+        chunks = wordChunks.map(chunk => chunk.text);
+        chunkMetadataList = wordChunks.map(chunk => chunk.metadata);
+        
+        logger.info(`[uploadVectorsLocal] Word解析成功: ${wordChunks.length} 个块`);
+      } catch (wordError) {
+        logger.warn(`[uploadVectorsLocal] Word解析失败，回退到普通文本解析: ${wordError.message}`);
+        // 回退到普通文本解析
+        const { text, bytes } = await parseText({ req, file, file_id: file_id });
+        if (!text || text.trim().length === 0) {
+          throw new Error('文件解析后没有文本内容');
+        }
+        chunks = splitTextIntoChunks(text, CHUNK_SIZE, CHUNK_OVERLAP);
+        // 为普通文本文件创建默认metadata
+        chunkMetadataList = chunks.map((_, idx) => ({
+          chunk_index: idx,
+          source: 'text',
+        }));
+        logger.info(`[uploadVectorsLocal] 文件已分块: ${chunks.length} 个块`);
+      }
+    } else {
+      // 普通文本文件解析
+      const { text, bytes } = await parseText({ req, file, file_id: file_id });
+      if (!text || text.trim().length === 0) {
+        throw new Error('文件解析后没有文本内容');
+      }
+      
+      logger.info(`[uploadVectorsLocal] 文件解析成功: ${bytes} 字节`);
 
-    if (!text || text.trim().length === 0) {
-      throw new Error('文件解析后没有文本内容');
+      // 2. 文本分块（使用配置的参数）
+      logger.info(
+        `[uploadVectorsLocal] 使用分块参数: chunkSize=${CHUNK_SIZE}, chunkOverlap=${CHUNK_OVERLAP}`
+      );
+      chunks = splitTextIntoChunks(text, CHUNK_SIZE, CHUNK_OVERLAP);
+      // 为普通文本文件创建默认metadata
+      chunkMetadataList = chunks.map((_, idx) => ({
+        chunk_index: idx,
+        source: 'text',
+      }));
+      logger.info(`[uploadVectorsLocal] 文件已分块: ${chunks.length} 个块`);
     }
-    
-    logger.info(`[uploadVectorsLocal] 文件解析成功: ${bytes} 字节`);
-
-    // 2. 文本分块（使用配置的参数）
-    logger.info(
-      `[uploadVectorsLocal] 使用分块参数: chunkSize=${CHUNK_SIZE}, chunkOverlap=${CHUNK_OVERLAP}`
-    );
-    const chunks = splitTextIntoChunks(text, CHUNK_SIZE, CHUNK_OVERLAP);
-    logger.info(`[uploadVectorsLocal] 文件已分块: ${chunks.length} 个块`);
 
     if (chunks.length === 0) {
       throw new Error('文件分块后没有内容');
@@ -391,10 +505,12 @@ async function uploadVectorsLocal({ req, file, file_id, entity_id, storageMetada
     insertedCount = await processChunksInBatches({
       chunks,
       embeddings,
+      chunkMetadataList, // 传递chunk metadata列表
       file_id,
       userId,
       entity_id,
       file,
+      fixedFilename, // 🔥 传递修复后的文件名
       storageMetadata,
       pool,
       embeddingService,
@@ -402,12 +518,12 @@ async function uploadVectorsLocal({ req, file, file_id, entity_id, storageMetada
     });
 
     logger.info(
-      `[uploadVectorsLocal] 文件向量化完成: ${file.originalname} (${insertedCount} 个块)`
+      `[uploadVectorsLocal] 文件向量化完成: ${fixedFilename} (${insertedCount} 个块)`
     );
 
     return {
       bytes: file.size,
-      filename: file.originalname,
+      filename: fixedFilename, // 使用修复后的文件名
       filepath: FileSources.vectordb,
       embedded: true,
     };
@@ -448,17 +564,19 @@ async function uploadVectorsLocal({ req, file, file_id, entity_id, storageMetada
 }
 
 async function uploadVectors({ req, file, file_id, entity_id, storageMetadata }) {
-  logger.info(`[uploadVectors] 开始处理文件向量化: ${file.originalname}, file_id=${file_id}, entity_id=${entity_id || '无'}`);
+  // 🔥 修复文件名编码问题
+  const fixedFilename = fixFilenameEncoding(file.originalname);
+  logger.info(`[uploadVectors] 开始处理文件向量化: ${fixedFilename}, file_id=${file_id}, entity_id=${entity_id || '无'}`);
   
   // 如果未配置 RAG_API_URL，使用本地向量化服务
   if (!process.env.RAG_API_URL) {
     logger.info('[uploadVectors] RAG_API_URL 未配置，使用本地向量化服务');
     try {
       const result = await uploadVectorsLocal({ req, file, file_id, entity_id, storageMetadata });
-      logger.info(`[uploadVectors] 本地向量化成功: ${file.originalname}`);
+      logger.info(`[uploadVectors] 本地向量化成功: ${fixedFilename}`);
       return result;
     } catch (error) {
-      logger.error(`[uploadVectors] 本地向量化失败: ${file.originalname}`, error);
+      logger.error(`[uploadVectors] 本地向量化失败: ${fixedFilename}`, error);
       throw error;
     }
   }
@@ -501,7 +619,7 @@ async function uploadVectors({ req, file, file_id, entity_id, storageMetadata })
 
     return {
       bytes: file.size,
-      filename: file.originalname,
+      filename: fixedFilename, // 使用修复后的文件名
       filepath: FileSources.vectordb,
       embedded: Boolean(responseData.known_type),
     };

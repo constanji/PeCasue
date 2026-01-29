@@ -20,6 +20,7 @@ const {
 const { EnvVar } = require('@because/agents');
 const { logger } = require('@because/data-schemas');
 const { sanitizeFilename, parseText, processAudioFile } = require('@because/api');
+const { fixFilenameEncoding } = require('~/server/utils/files');
 const {
   convertImage,
   resizeAndConvert,
@@ -49,11 +50,14 @@ const createSanitizedUploadWrapper = (uploadFunction) => {
   return async (params) => {
     const { req, file, file_id, ...restParams } = params;
 
+    // 🔥 先修复文件名编码问题（Latin1 → UTF-8）
+    const fixedFilename = fixFilenameEncoding(file.originalname);
+    
     // Create a modified file object with sanitized original name
     // This ensures consistent filename handling across all storage strategies
     const sanitizedFile = {
       ...file,
-      originalname: sanitizeFilename(file.originalname),
+      originalname: sanitizeFilename(fixedFilename), // 先修复编码，再清理
     };
 
     return uploadFunction({ req, file: sanitizedFile, file_id, ...restParams });
@@ -355,6 +359,8 @@ const processImageFile = async ({ req, res, metadata, returnFile = false }) => {
   if (returnFile) {
     return result;
   }
+  // 🔥 显式设置 UTF-8 charset，防止前端二次错误解码
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.status(200).json({ message: 'File uploaded and processed successfully', ...result });
 };
 
@@ -491,6 +497,8 @@ const processFileUpload = async ({ req, res, metadata }) => {
     },
     true,
   );
+  // 🔥 显式设置 UTF-8 charset，防止前端二次错误解码
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.status(200).json({ message: 'File uploaded and processed successfully', ...result });
 };
 
@@ -589,6 +597,8 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
         });
       }
       const result = await createFile(fileInfo, true);
+      // 🔥 显式设置 UTF-8 charset，防止前端二次错误解码
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       return res
         .status(200)
         .json({ message: 'Agent file uploaded and processed successfully', ...result });
@@ -768,6 +778,8 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
 
   const result = await createFile(fileInfo, true);
 
+  // 🔥 显式设置 UTF-8 charset，防止前端二次错误解码
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.status(200).json({ message: 'Agent file uploaded and processed successfully', ...result });
 };
 

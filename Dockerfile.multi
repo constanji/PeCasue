@@ -2,20 +2,26 @@
 # v0.8.1-rc2
 
 # Base for all builds
+# 使用 Debian slim 镜像（自带 glibc，完美支持 onnxruntime-node / @xenova/transformers）
 # 使用标签而不是 SHA256，避免跨平台构建时的网络超时问题
-FROM node:20-alpine AS base-min
-# 配置 Alpine 镜像源（使用阿里云镜像，解决网络问题）
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories || \
-    echo "https://mirrors.aliyun.com/alpine/v$(cat /etc/alpine-release | cut -d'.' -f1,2)/main" > /etc/apk/repositories && \
-    echo "https://mirrors.aliyun.com/alpine/v$(cat /etc/alpine-release | cut -d'.' -f1,2)/community" >> /etc/apk/repositories
-# Install jemalloc
-RUN apk add --no-cache jemalloc
-# Set environment variable to use jemalloc
-ENV LD_PRELOAD=/usr/lib/libjemalloc.so.2
+FROM node:20-bookworm-slim AS base-min
 WORKDIR /app
 # 安装构建工具和 Python（用于编译 native 模块如 sharp）
 # 安装 vips 以便 sharp 可以使用系统 libvips，避免下载二进制文件
-RUN apk --no-cache add curl python3 py3-pip vips vips-dev build-base
+# 安装 jemalloc（可选，用于内存优化）
+# Debian 自带 glibc，无需额外安装，完美支持 onnxruntime-node
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    python3 \
+    python3-pip \
+    build-essential \
+    libvips \
+    libvips-dev \
+    ca-certificates \
+    libjemalloc2 \
+    && rm -rf /var/lib/apt/lists/*
+# Set environment variable to use jemalloc
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 # 配置 npm 镜像源和重试设置（解决网络问题）
 RUN npm config set registry https://registry.npmmirror.com && \
     npm config set fetch-retry-maxtimeout 600000 && \
@@ -106,24 +112,11 @@ RUN npm run build
 FROM base-min AS api-build
 # Add `uv` for extended MCP support (required for MCP functionality)
 # 注意：Python、vips 和构建工具已在 base-min 阶段安装
-# 这里只需要安装 uv（Python 和 pip 已可用）
-# 尝试多种方式安装 uv，确保 MCP 功能可用
-# 方式 1: 通过 apk 安装（最快）
-RUN apk add --no-cache uv 2>/dev/null && uv --version && echo "uv installed via apk" || \
-    # 方式 2: 使用官方安装脚本
-    (echo "Installing uv via official script..." && \
-     export CARGO_HOME=/tmp/cargo && \
-     curl -LsSf https://astral.sh/uv/install.sh | CARGO_HOME=/tmp/cargo sh && \
-     cp /tmp/cargo/bin/uv /usr/local/bin/uv && \
-     cp /tmp/cargo/bin/uvx /usr/local/bin/uvx && \
-     rm -rf /tmp/cargo && \
-     uv --version && echo "uv installed via official script") || \
-    # 方式 3: 通过 pip 安装（备用方案）
-    (echo "Installing uv via pip..." && \
-     pip install uv && \
-     ln -sf $(which uv) /usr/local/bin/uvx && \
-     uv --version && echo "uv installed via pip") || \
-    (echo "ERROR: All uv installation methods failed. MCP support will not work." && exit 1)
+# 使用官方安装脚本安装 uv（Debian 推荐方式）
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ln -s /root/.cargo/bin/uv /usr/local/bin/uv && \
+    ln -s /root/.cargo/bin/uvx /usr/local/bin/uvx && \
+    uv --version && echo "✓ uv installed successfully"
 WORKDIR /app
 # Copy package files and agents-because dist before installing dependencies
 COPY package*.json ./
@@ -140,12 +133,15 @@ RUN npm config set registry https://registry.npmmirror.com && \
     npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 15000
 # Install only production deps
-# 由于已安装 vips 和 vips-dev，sharp 会自动使用系统 libvips，避免下载二进制文件的网络问题
+# 由于已安装 vips 和 libvips-dev，sharp 会自动使用系统 libvips，避免下载二进制文件
 RUN npm ci --omit=dev
 # Certain build artifacts need mongodb runtime deps (may not be prod deps)
 RUN npm install mongodb --omit=dev
 # Fix case-sensitive imports: @Because/* -> @because/*
 RUN ln -s /app/node_modules/@because /app/node_modules/@Because || true
+# 验证关键依赖是否正确安装（特别是 @xenova/transformers）
+# Debian 自带 glibc，无需设置 LD_LIBRARY_PATH，onnxruntime-node 可以直接工作
+RUN node -e "try { const path = require.resolve('@xenova/transformers'); console.log('✓ @xenova/transformers found at:', path); require('@xenova/transformers'); console.log('✓ @xenova/transformers loaded successfully'); } catch(e) { console.error('✗ @xenova/transformers error:', e.message, e.stack); process.exit(1); }"
 COPY api ./api
 COPY config ./config
 COPY specs ./specs

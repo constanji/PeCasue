@@ -95,7 +95,20 @@ async function getS3URL({
 
   // Add response headers if specified
   if (customFilename) {
-    params.ResponseContentDisposition = `attachment; filename="${customFilename}"`;
+    // 🔥 修复Content-Disposition header编码问题
+    const { fixFilenameEncoding } = require('~/server/utils/files');
+    const fixedFilename = fixFilenameEncoding(customFilename);
+    
+    // 检查是否包含非ASCII字符
+    if (/[^\x00-\x7F]/.test(fixedFilename)) {
+      // 包含非ASCII字符：使用RFC 5987格式
+      const asciiFallback = fixedFilename.replace(/[^\x00-\x7F]/g, '_');
+      const encodedFilename = encodeURIComponent(fixedFilename);
+      params.ResponseContentDisposition = `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedFilename}`;
+    } else {
+      // 只包含ASCII字符：直接使用
+      params.ResponseContentDisposition = `attachment; filename="${fixedFilename}"`;
+    }
   }
 
   if (contentType) {
