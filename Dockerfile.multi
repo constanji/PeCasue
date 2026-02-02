@@ -4,7 +4,9 @@
 # Base for all builds
 # 使用 Debian slim 镜像（自带 glibc，完美支持 onnxruntime-node / @xenova/transformers）
 # 使用标签而不是 SHA256，避免跨平台构建时的网络超时问题
-FROM node:20-bookworm-slim AS base-min
+# 临时使用镜像代理前缀以解决 buildx 网络问题（buildx 不经过 Docker daemon 的镜像加速器）
+# 如果网络正常，可以改回 node:20-bookworm-slim
+FROM docker.m.daocloud.io/library/node:20-bookworm-slim AS base-min
 WORKDIR /app
 # 安装构建工具和 Python（用于编译 native 模块如 sharp）
 # 安装 vips 以便 sharp 可以使用系统 libvips，避免下载二进制文件
@@ -50,72 +52,101 @@ COPY agents-because/dist ./agents-because/dist
 ENV DISABLE_SOURCEMAP=true
 ENV NODE_OPTIONS="--max-old-space-size=8192"
 # Build only if dist doesn't exist or is empty
-RUN if [ ! -d "agents-because/dist" ] || [ -z "$(ls -A agents-because/dist 2>/dev/null)" ]; then \
+RUN     if [ ! -d "agents-because/dist" ] || [ -z "$(ls -A agents-because/dist 2>/dev/null)" ]; then \
       echo "Building agents-because (dist not found)..."; \
-      cd agents-because && npm install --no-audit && DISABLE_SOURCEMAP=true npm run build; \
+      cd agents-because && npm install --no-audit --legacy-peer-deps && DISABLE_SOURCEMAP=true npm run build; \
     else \
       echo "Using existing dist directory, skipping build"; \
     fi
 
 # Install all dependencies for every build
-FROM base-min AS base
+# 这个阶段只负责安装依赖，不进行构建
+FROM base-min AS base-deps
 WORKDIR /app
 COPY --from=agents-build /app/agents-because/dist ./agents-because/dist
 COPY --from=agents-build /app/agents-because/package.json ./agents-because/package.json
 COPY --from=agents-build /app/agents-because/husky-setup.js ./agents-because/husky-setup.js
+# 复制所有 package.json 文件（包括 client），确保 npm install 能识别所有工作区
+COPY package*.json ./
+COPY packages/data-provider/package*.json ./packages/data-provider/
+COPY packages/api/package*.json ./packages/api/
+COPY packages/data-schemas/package*.json ./packages/data-schemas/
+COPY packages/client/package*.json ./packages/client/
+COPY client/package*.json ./client/
+COPY api/package*.json ./api/
 ENV HUSKY=0
 ENV CI=true
-RUN npm ci
+# 使用 npm install --legacy-peer-deps 替代 npm ci，解决 @langchain/core 版本冲突
+# @because/api 需要 @langchain/core@^1.0.0，但其他包需要 0.3.x
+# npm ci 不支持 --legacy-peer-deps，必须使用 npm install
+# 安装所有工作区的依赖（包括 client 的所有依赖）
+RUN npm install --legacy-peer-deps
+
+# Base stage with dependencies installed
+FROM base-deps AS base
+WORKDIR /app
 
 # Build `data-provider` package
-FROM base AS data-provider-build
-WORKDIR /app/packages/data-provider
-COPY packages/data-provider ./
+# 继承 base-deps 确保有完整的 node_modules
+FROM base-deps AS data-provider-build
+WORKDIR /app
+COPY packages/data-provider ./packages/data-provider
 ENV NODE_OPTIONS="--max-old-space-size=4096"
+WORKDIR /app/packages/data-provider
 RUN npm run build
 
 # Build `data-schemas` package
-FROM base AS data-schemas-build
-WORKDIR /app/packages/data-schemas
-COPY packages/data-schemas ./
+# 继承 base-deps 确保有完整的 node_modules
+FROM base-deps AS data-schemas-build
+WORKDIR /app
+COPY packages/data-schemas ./packages/data-schemas
 COPY --from=data-provider-build /app/packages/data-provider/dist /app/packages/data-provider/dist
 ENV NODE_OPTIONS="--max-old-space-size=4096"
+WORKDIR /app/packages/data-schemas
 RUN npm run build
 
 # Build `api` package
-FROM base AS api-package-build
-WORKDIR /app/packages/api
-COPY packages/api ./
+# 继承 base-deps 确保有完整的 node_modules
+FROM base-deps AS api-package-build
+WORKDIR /app
+COPY packages/api ./packages/api
 COPY --from=data-provider-build /app/packages/data-provider/dist /app/packages/data-provider/dist
 COPY --from=data-schemas-build /app/packages/data-schemas/dist /app/packages/data-schemas/dist
 ENV NODE_OPTIONS="--max-old-space-size=8192"
+WORKDIR /app/packages/api
 RUN npm run build
 
 # Build `client` package
-FROM base AS client-package-build
-WORKDIR /app/packages/client
-COPY packages/client ./
-ENV NODE_OPTIONS="--max-old-space-size=4096"
-RUN npm run build
+# 使用本地预构建的 packages/client/dist，绕过 Docker 内构建的依赖路径问题
+# 构建前需要在本地执行: npm run build:client-package
+FROM base-min AS client-package-build
+WORKDIR /app
+# 直接复制本地已构建的 packages/client/dist 目录
+# 如果本地没有构建，会失败并提示需要先构建
+COPY packages/client/dist ./packages/client/dist
+# 验证 dist 目录存在
+RUN test -d "/app/packages/client/dist" || (echo "ERROR: packages/client/dist not found. Please build client package locally first: npm run build:client-package" && exit 1)
 
 # Client build
-FROM base AS client-build
-WORKDIR /app/client
-COPY client ./
-COPY --from=data-provider-build /app/packages/data-provider/dist /app/packages/data-provider/dist
-COPY --from=client-package-build /app/packages/client/dist /app/packages/client/dist
-COPY --from=client-package-build /app/packages/client/src /app/packages/client/src
-ENV NODE_OPTIONS="--max-old-space-size=4096"
-RUN npm run build
+# 使用本地预构建的 client/dist，绕过 Docker 内构建的依赖路径问题
+# 构建前需要在本地执行: npm run build:client-package && cd client && npm run build
+FROM base-min AS client-build
+WORKDIR /app
+# 直接复制本地已构建的 client/dist 目录
+# 如果本地没有构建，会失败并提示需要先构建
+COPY client/dist ./client/dist
+# 验证 dist 目录存在
+RUN test -d "/app/client/dist" || (echo "ERROR: client/dist not found. Please build client locally first: npm run build:client-package && cd client && npm run build" && exit 1)
 
 # API setup (including client dist)
 FROM base-min AS api-build
 # Add `uv` for extended MCP support (required for MCP functionality)
 # 注意：Python、vips 和构建工具已在 base-min 阶段安装
 # 使用官方安装脚本安装 uv（Debian 推荐方式）
+# 安装脚本会将 uv 安装到 /root/.local/bin，需要创建软链接到 /usr/local/bin
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ln -s /root/.cargo/bin/uv /usr/local/bin/uv && \
-    ln -s /root/.cargo/bin/uvx /usr/local/bin/uvx && \
+    ln -s /root/.local/bin/uv /usr/local/bin/uv && \
+    ln -s /root/.local/bin/uvx /usr/local/bin/uvx && \
     uv --version && echo "✓ uv installed successfully"
 WORKDIR /app
 # Copy package files and agents-because dist before installing dependencies
@@ -134,9 +165,10 @@ RUN npm config set registry https://registry.npmmirror.com && \
     npm config set fetch-retry-mintimeout 15000
 # Install only production deps
 # 由于已安装 vips 和 libvips-dev，sharp 会自动使用系统 libvips，避免下载二进制文件
-RUN npm ci --omit=dev
+# 使用 npm install --legacy-peer-deps 替代 npm ci，解决 @langchain/core 版本冲突
+RUN npm install --omit=dev --legacy-peer-deps
 # Certain build artifacts need mongodb runtime deps (may not be prod deps)
-RUN npm install mongodb --omit=dev
+RUN npm install mongodb --omit=dev --legacy-peer-deps
 # Fix case-sensitive imports: @Because/* -> @because/*
 RUN ln -s /app/node_modules/@because /app/node_modules/@Because || true
 # 验证关键依赖是否正确安装（特别是 @xenova/transformers）

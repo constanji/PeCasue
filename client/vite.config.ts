@@ -260,7 +260,15 @@ export default defineConfig(({ command }) => ({
       '@because/client': path.resolve(__dirname, '../packages/client/dist/index.es.js'),
       '@because/data-provider/react-query': path.resolve(__dirname, '../packages/data-provider/dist/react-query/index.es.js'),
       '@because/data-provider': path.resolve(__dirname, '../packages/data-provider/dist/index.es.js'),
+      // @because/client 的 dist 中 bare imports 从应用 node_modules 解析
+      'lucide-react': path.resolve(__dirname, 'node_modules/lucide-react'),
+      'framer-motion': path.resolve(__dirname, 'node_modules/framer-motion'),
+      '@react-spring/web': path.resolve(__dirname, 'node_modules/@react-spring/web'),
     },
+  },
+  // 确保 @because/client 的 peer 依赖被预打包
+  optimizeDeps: {
+    include: ['lucide-react', 'framer-motion', '@react-spring/web'],
   },
 }));
 
