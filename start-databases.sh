@@ -41,12 +41,12 @@ echo -e "${BLUE}📊 步骤1: 启动 MongoDB (端口 27033)${NC}"
 echo -e "${BLUE}----------------${NC}"
 
 # 检查MongoDB是否已在运行
-MONGODB_PID=$(pgrep -f "mongod --dbpath ./data-node --port 27033")
+MONGODB_PID=$(pgrep -f "mongod --dbpath ./data-node --port 27033" 2>/dev/null || echo "")
 if [ -n "$MONGODB_PID" ]; then
     echo -e "${YELLOW}⚠️  MongoDB已在运行 (PID: $MONGODB_PID)${NC}"
     
     # 验证连接
-    if mongosh --port 27033 --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+    if lsof -i :27033 > /dev/null 2>&1 && mongosh --port 27033 --eval "db.adminCommand('ping')" 2>&1 | grep -q "ok.*1"; then
         echo -e "${GREEN}✅ MongoDB连接正常${NC}"
     else
         echo -e "${RED}❌ MongoDB进程存在但无法连接，正在重启...${NC}"
@@ -59,7 +59,7 @@ fi
 # 如果MongoDB未运行，启动它
 if [ -z "$MONGODB_PID" ]; then
     echo "正在启动MongoDB..."
-    mongod --dbpath ./data-node --port 27033 --bind_ip_all --logpath ./logs/mongodb.log &
+    mongod --dbpath ./data-node --port 27033 --bind_ip_all --logpath ./logs/mongodb.log --nounixsocket &
     MONGODB_PID=$!
     echo -e "${GREEN}✅ MongoDB已启动 (PID: $MONGODB_PID)${NC}"
     
@@ -71,18 +71,64 @@ if [ -z "$MONGODB_PID" ]; then
     RETRY_COUNT=0
     MAX_RETRIES=6
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-        if mongosh --port 27033 --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
-            echo -e "${GREEN}✅ MongoDB连接成功${NC}"
-            break
-        else
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "⏳ 等待MongoDB就绪... ($RETRY_COUNT/$MAX_RETRIES)"
-                sleep 2
+        # 先检查进程是否还在运行
+        if ! ps -p $MONGODB_PID > /dev/null 2>&1; then
+            echo -e "${RED}❌ MongoDB进程已退出${NC}"
+            
+            # 检查是否是数据库损坏问题
+            if grep -q "WiredTiger metadata corruption\|Failed to start up WiredTiger\|Please read the documentation for starting MongoDB with --repair" ./logs/mongodb.log 2>/dev/null; then
+                echo -e "${YELLOW}⚠️  检测到数据库文件损坏！${NC}"
+                echo -e "${YELLOW}正在尝试修复数据库...${NC}"
+                
+                # 尝试修复数据库
+                echo -e "${BLUE}执行修复命令: mongod --dbpath ./data-node --repair --nounixsocket${NC}"
+                echo "⏳ 这可能需要几分钟时间，请耐心等待..."
+                
+                REPAIR_OUTPUT=$(mongod --dbpath ./data-node --repair --nounixsocket --logpath ./logs/mongodb-repair.log 2>&1)
+                REPAIR_EXIT_CODE=$?
+                
+                # 显示修复输出的最后几行
+                echo "$REPAIR_OUTPUT" | tail -10
+                
+                if [ $REPAIR_EXIT_CODE -eq 0 ]; then
+                    echo -e "${GREEN}✅ 数据库修复完成，重新启动MongoDB...${NC}"
+                    # 重新启动 MongoDB
+                    mongod --dbpath ./data-node --port 27033 --bind_ip_all --logpath ./logs/mongodb.log --nounixsocket &
+                    MONGODB_PID=$!
+                    sleep 5
+                    RETRY_COUNT=0  # 重置重试计数
+                    continue
+                else
+                    echo -e "${RED}❌ 数据库修复失败${NC}"
+                    echo -e "${YELLOW}💡 如果修复失败，您可能需要：${NC}"
+                    echo -e "${YELLOW}   1. 备份数据: cp -r ./data-node ./data-node.backup${NC}"
+                    echo -e "${YELLOW}   2. 删除损坏的数据: rm -rf ./data-node/*${NC}"
+                    echo -e "${YELLOW}   3. 重新运行此脚本${NC}"
+                    exit 1
+                fi
             else
-                echo -e "${RED}❌ MongoDB启动失败，请检查日志: ./logs/mongodb.log${NC}"
+                echo -e "${RED}请检查日志: ./logs/mongodb.log${NC}"
                 exit 1
             fi
+        fi
+        
+        # 检查端口是否在监听
+        if lsof -i :27033 > /dev/null 2>&1; then
+            # 尝试使用 mongosh 连接（捕获段错误）
+            if mongosh --port 27033 --eval "db.adminCommand('ping')" 2>&1 | grep -q "ok.*1"; then
+                echo -e "${GREEN}✅ MongoDB连接成功${NC}"
+                break
+            fi
+        fi
+        
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+            echo "⏳ 等待MongoDB就绪... ($RETRY_COUNT/$MAX_RETRIES)"
+            sleep 2
+        else
+            echo -e "${RED}❌ MongoDB启动失败，请检查日志: ./logs/mongodb.log${NC}"
+            echo -e "${YELLOW}💡 提示: 如果看到段错误，可能是 mongosh 版本问题，请尝试更新: brew upgrade mongosh${NC}"
+            exit 1
         fi
     done
 fi
@@ -182,7 +228,7 @@ echo -e "${BLUE}🔍 最终状态检查${NC}"
 echo -e "${BLUE}----------------${NC}"
 
 # MongoDB状态
-if mongosh --port 27033 --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+if lsof -i :27033 > /dev/null 2>&1 && mongosh --port 27033 --eval "db.adminCommand('ping')" 2>&1 | grep -q "ok.*1"; then
     echo -e "${GREEN}✅ MongoDB: 运行中 (localhost:27033)${NC}"
 else
     echo -e "${RED}❌ MongoDB: 未运行${NC}"
