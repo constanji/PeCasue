@@ -7,11 +7,12 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { useChatContext, useAgentsMapContext } from '~/Providers';
-import { EModelEndpoint } from '@because/data-provider';
+import { EModelEndpoint, LocalStorageKeys } from '@because/data-provider';
 import { useGetStartupConfig, useGetEndpointsQuery } from '~/data-provider';
 import { getIconEndpoint, getEntity, cn } from '~/utils';
 import { useSubmitMessage } from '~/hooks';
 import { useToastContext } from '@because/client';
+import useLocalStorage from '~/hooks/useLocalStorage';
 
 interface PromptItem {
   key: string;
@@ -55,6 +56,12 @@ function AgentPromptsContent() {
     assistant_id: conversation?.assistant_id,
   });
 
+  // 从左侧业务列表获取当前选中的数据源（与 AgentsList 同步）
+  const [selectedDataSourceId] = useLocalStorage<string | null>(
+    LocalStorageKeys.LAST_DATA_SOURCE_ID,
+    null,
+  );
+
   // 获取提示集配置
   const promptsConfig = useMemo(() => {
     if (!startupConfig?.agentPrompts) {
@@ -65,22 +72,37 @@ function AgentPromptsContent() {
     const globalConfig = startupConfig.agentPrompts.global;
     const hasValidGlobalItems = globalConfig?.items && Array.isArray(globalConfig.items) && globalConfig.items.length > 0;
 
-    // 如果对话关联了数据源，优先使用数据源的提示集
-    const dataSourceId = (conversation as any)?.data_source_id;
+    // 优先使用左侧业务列表选中的数据源，其次使用对话关联的数据源
+    const dataSourceId = selectedDataSourceId ?? (conversation as any)?.data_source_id;
+    const hasExplicitDataSourceSelection = !!selectedDataSourceId;
+
     if (dataSourceId && startupConfig.agentPrompts.dataSources?.[dataSourceId]) {
       const dataSourceConfig = startupConfig.agentPrompts.dataSources[dataSourceId];
       const hasValidDataSourceItems = dataSourceConfig?.items && Array.isArray(dataSourceConfig.items) && dataSourceConfig.items.length > 0;
       if (hasValidDataSourceItems) {
         return dataSourceConfig;
       }
+      // 数据源未配置提示集，回退到全局
+      if (hasValidGlobalItems) {
+        return globalConfig;
+      }
+      // 全局也为空，不显示任何提示集
+      return null;
     }
 
-    // 如果有有效的全局提示集，使用全局的
+    if (hasExplicitDataSourceSelection) {
+      // 用户已选择数据源，但该数据源在配置中不存在，回退到全局
+      if (hasValidGlobalItems) {
+        return globalConfig;
+      }
+      return null;
+    }
+
+    // 未选择数据源时，使用原有回退逻辑
     if (hasValidGlobalItems) {
       return globalConfig;
     }
 
-    // 如果没有全局提示集，尝试使用第一个有数据的数据源提示集
     if (startupConfig.agentPrompts.dataSources) {
       const dataSourceEntries = Object.entries(startupConfig.agentPrompts.dataSources);
       for (const [dsId, dsConfig] of dataSourceEntries) {
@@ -92,7 +114,6 @@ function AgentPromptsContent() {
       }
     }
 
-    // 向后兼容：如果配置了特定智能体的提示集，使用智能体的
     if (isAgent && entity?.id && startupConfig.agentPrompts.agents?.[entity.id]) {
       const agentConfig = startupConfig.agentPrompts.agents[entity.id];
       const hasValidAgentItems = agentConfig?.items && Array.isArray(agentConfig.items) && agentConfig.items.length > 0;
@@ -102,7 +123,7 @@ function AgentPromptsContent() {
     }
 
     return null;
-  }, [startupConfig, conversation, isAgent, entity]);
+  }, [startupConfig, conversation, isAgent, entity, selectedDataSourceId]);
 
   // 转换配置为提示项数组
   const items: PromptItem[] = useMemo(() => {

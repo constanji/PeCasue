@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import type { TStartupConfig } from '@because/data-provider';
+import { useGetStartupConfig } from '~/data-provider';
 import { cn } from '~/utils';
 import KnowledgeBaseManagement from './KnowledgeBaseManagement';
 import DataSourceManagement from './DataSourceManagement';
 import ProjectConfig from './ProjectConfig';
+import PromptsManagement from './PromptsManagement';
 
-type TabType = 'dataSources' | 'knowledgeBase' | 'projectConfig';
+type TabType = 'dataSources' | 'knowledgeBase' | 'projectConfig' | 'prompts';
 
 const isValidTab = (tab: string | null): tab is TabType => {
-  return tab === 'dataSources' || tab === 'knowledgeBase' || tab === 'projectConfig';
+  return tab === 'dataSources' || tab === 'knowledgeBase' || tab === 'projectConfig' || tab === 'prompts';
 };
 
 export default function AssetCenterContent() {
+  const { data: startupConfig } = useGetStartupConfig();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   const initialTab: TabType = isValidTab(tabParam) ? tabParam : 'projectConfig';
@@ -45,6 +49,11 @@ export default function AssetCenterContent() {
       id: 'knowledgeBase',
       label: '知识库管理',
       description: '管理向量数据库中的语义模型、QA对、同义词和业务知识',
+    },
+    {
+      id: 'prompts',
+      label: '提示集管理',
+      description: '管理初始对话界面中显示的提示集',
     },
   ];
 
@@ -88,6 +97,11 @@ export default function AssetCenterContent() {
         {activeTab === 'knowledgeBase' && (
           <div className="h-full overflow-hidden px-4 py-4">
             <KnowledgeBaseManagement />
+          </div>
+        )}
+        {activeTab === 'prompts' && (
+          <div className="h-full overflow-hidden px-4 py-4">
+            <PromptsManagement startupConfig={startupConfig} />
           </div>
         )}
       </div>
