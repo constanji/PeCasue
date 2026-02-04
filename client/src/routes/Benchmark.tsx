@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
-import { useGetEndpointsQuery } from '~/data-provider';
+import { useGetEndpointsQuery, useListAgentsQuery } from '~/data-provider';
 import { useGetModelsQuery } from '@because/data-provider/react-query';
 import { useAuthContext } from '~/hooks/AuthContext';
-import { SystemRoles } from '@because/data-provider';
+import { EModelEndpoint, PermissionBits, SystemRoles } from '@because/data-provider';
 import useAuthRedirect from './useAuthRedirect';
 
 const BENCHMARK_CONFIG_KEY = 'benchmark_config';
@@ -64,6 +64,11 @@ export default function Benchmark() {
 
   const { data: endpointsConfig } = useGetEndpointsQuery({ enabled: isAuthenticated });
   const { data: modelsConfig } = useGetModelsQuery();
+  const { data: agentsResponse } = useListAgentsQuery(
+    { requiredPermission: PermissionBits.VIEW, limit: 200 },
+    { enabled: isAuthenticated && selectedEndpoint === EModelEndpoint.agents },
+  );
+  const agents = useMemo(() => agentsResponse?.data ?? [], [agentsResponse]);
 
   const availableEndpoints = useMemo(() => {
     if (!endpointsConfig) return [];
@@ -322,15 +327,24 @@ export default function Benchmark() {
                         className="w-full rounded-md border border-border-light bg-surface-primary px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none"
                       >
                         <option value="">-- 选择模型 --</option>
-                        {availableModels.map((model) => (
-                          <option key={model} value={model}>
-                            {model}
-                          </option>
-                        ))}
+                        {selectedEndpoint === EModelEndpoint.agents
+                          ? agents.map((agent: any) => (
+                              <option key={agent.id} value={agent.id}>
+                                {agent.name || agent.id} ({agent.id})
+                              </option>
+                            ))
+                          : availableModels.map((model) => (
+                              <option key={model} value={model}>
+                                {model}
+                              </option>
+                            ))}
                       </select>
                     ) : (
                       <div className="rounded-md border border-border-light bg-surface-tertiary px-3 py-2 text-sm text-text-secondary">请先选择端点</div>
                     )}
+                    {selectedEndpoint === EModelEndpoint.agents && selectedEndpoint && agents.length === 0 ? (
+                      <div className="mt-2 text-xs text-text-tertiary">暂无可用智能体（请先在 Agent平台创建，并确保你有权限访问）</div>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -420,7 +434,11 @@ export default function Benchmark() {
                 <h2 className="mb-4 text-lg font-semibold text-text-primary">4. 选择评估指标</h2>
                 <div className="space-y-3">
                   {evaluationMetrics.map((metric) => (
-                    <label key={metric.id} className="flex cursor-pointer items-center rounded-md border border-border-light bg-surface-primary px-3 py-2 hover:bg-surface-hover">
+                    <label
+                      key={metric.id}
+                      title={metric.description}
+                      className="flex cursor-pointer items-center rounded-md border border-border-light bg-surface-primary px-3 py-2 hover:bg-surface-hover"
+                    >
                       <input
                         type="checkbox"
                         checked={metric.checked}
