@@ -1,0 +1,6 @@
+# Python dependencies for BIRD evaluation scripts
+func-timeout>=4.3.5
+pymysql>=1.1.1
+psycopg2-binary>=2.9.9
+numpy>=2.0.0
+tqdm>=4.66.4

@@ -23,6 +23,8 @@ import Root from './Root';
 import AgentBuilder from './AgentBuilder';
 import GlobalConfigManager from './GlobalConfigManager';
 import AssetCenterManager from './AssetCenterManager';
+import Benchmark from './Benchmark';
+import Result from './Result';
 
 const AuthLayout = () => (
   <AuthContextProvider>
@@ -141,6 +143,14 @@ export const router = createBrowserRouter(
             {
               path: 'asset-center',
               element: <AssetCenterManager />,
+            },
+            {
+              path: 'benchmark',
+              element: <Benchmark />,
+            },
+            {
+              path: 'result/:taskId',
+              element: <Result />,
             },
           ],
         },

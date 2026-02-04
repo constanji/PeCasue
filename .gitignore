@@ -82,6 +82,9 @@ my.secrets
 !**/.env.test.example
 cache.json
 api/data/
+api/benchmark/results/
+api/benchmark/data/*.json
+benchmark_results/
 owner.yml
 archive
 .vscode/settings.json

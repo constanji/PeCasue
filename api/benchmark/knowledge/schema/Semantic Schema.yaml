@@ -1,0 +1,163 @@
+database:
+  name: financial
+  description: >
+    银行业务数据集，包含客户、账户、地区、交易、贷款、信用卡等信息，
+    主要用于分析客户行为、金融风险、地区经济水平及账户资金流动。
+
+entities:
+
+  district:
+    description: 地区与宏观经济统计信息，用于刻画区域经济水平
+    primary_key: district_id
+    fields:
+      district_id: 地区唯一标识
+      A2: 地区名称
+      A3: 波西米亚区域名称
+      A4: 居民总数
+      A5: 居民数 < 499 的市镇数量
+      A6: 居民数 500–1999 的市镇数量
+      A7: 居民数 2000–9999 的市镇数量
+      A8: 居民数 > 10000 的市镇数量
+      A9: 无业务意义字段（可忽略）
+      A10: 城市居民比例
+      A11: 平均工资（average salary）
+      A12: 1995 年失业率
+      A13: 1996 年失业率
+      A14: 每 1000 名居民中的企业家数量
+      A15: 1995 年犯罪数量
+      A16: 1996 年犯罪数量
+    business_notes:
+      - A11 常用于衡量地区经济水平
+      - 可用于地区 vs 客户/账户的宏观分析
+
+  client:
+    description: 银行客户的基本人口属性
+    primary_key: client_id
+    foreign_keys:
+      district_id: district.district_id
+    fields:
+      client_id: 客户唯一标识
+      gender: 性别（F=女性, M=男性）
+      birth_date: 出生日期
+      district_id: 客户所属地区
+    business_notes:
+      - 客户通过 disp 与账户建立关系
+      - 性别、年龄常用于用户画像分析
+
+  account:
+    description: 银行账户基本信息
+    primary_key: account_id
+    foreign_keys:
+      district_id: district.district_id
+    fields:
+      account_id: 账户唯一标识
+      district_id: 开户地区
+      frequency: 对账单发送频率
+      date: 账户创建日期
+    business_notes:
+      - 一个账户可关联多个客户（OWNER / USER）
+      - 是交易、贷款、订单的核心实体
+
+  disp:
+    description: 客户与账户之间的关系表（多对多桥表）
+    primary_key: disp_id
+    foreign_keys:
+      client_id: client.client_id
+      account_id: account.account_id
+    fields:
+      disp_id: 分配关系唯一标识
+      client_id: 客户ID
+      account_id: 账户ID
+      type: >
+        分配类型：
+        OWNER = 账户所有者
+        USER = 使用者
+        DISPONENT = 授权人
+    business_notes:
+      - 判断账户“实际控制人”的关键表
+      - 信用卡通过 disp 绑定到客户
+
+  card:
+    description: 信用卡信息
+    primary_key: card_id
+    foreign_keys:
+      disp_id: disp.disp_id
+    fields:
+      card_id: 信用卡唯一标识
+      disp_id: 关联的账户-客户关系
+      type: 信用卡类型（青年卡 / 普通卡 / 金卡）
+      issued: 发卡日期
+    business_notes:
+      - 一张卡 ≈ 一个账户使用权限
+      - 用于分析信用卡使用行为
+
+  loan:
+    description: 账户层级的贷款信息
+    primary_key: loan_id
+    foreign_keys:
+      account_id: account.account_id
+    fields:
+      loan_id: 贷款唯一标识
+      account_id: 贷款所属账户
+      date: 贷款批准日期
+      amount: 贷款总金额（USD）
+      duration: 贷款期限（月）
+      payments: 月还款额
+      status: >
+        贷款状态：
+        A = 已还清（正常）
+        B = 已结束但未还清
+        C = 进行中，正常
+        D = 进行中，违约
+    business_notes:
+      - 风险分析核心表
+      - 常与地区工资、交易流水联合分析
+
+  order:
+    description: 定期或计划性转账指令
+    primary_key: order_id
+    foreign_keys:
+      account_id: account.account_id
+    fields:
+      order_id: 订单唯一标识
+      account_id: 发起账户
+      bank_to: 收款银行代码
+      account_to: 收款账户
+      amount: 转账金额（USD）
+      k_symbol: 支付目的（保险 / 家庭 / 租赁 / 贷款）
+    business_notes:
+      - 属于“计划行为”，不同于实时交易
+      - 常用于分析固定支出结构
+
+  trans:
+    description: 账户交易流水（最核心行为数据）
+    primary_key: trans_id
+    foreign_keys:
+      account_id: account.account_id
+    fields:
+      trans_id: 交易唯一标识
+      account_id: 交易账户
+      date: 交易日期
+      type: >
+        PRIJEM = 收入
+        VYDAJ = 支出
+      operation: >
+        交易方式（现金存款 / 现金取款 / 转账 / 信用卡取款等）
+      amount: 交易金额（USD，正负表示方向）
+      balance: 交易后余额
+      k_symbol: 交易目的（保险 / 利息 / 贷款 / 养老金等）
+      bank: 对方银行代码
+      account: 对方账户
+    business_notes:
+      - 用于现金流分析、消费模式识别
+      - 可计算余额变化率、稳定性、风险特征
+
+relationships:
+  - client 1---n disp n---1 account
+  - account 1---n trans
+  - account 1---n loan
+  - account 1---n order
+  - disp 1---n card
+  - district 1---n client
+  - district 1---n account
+

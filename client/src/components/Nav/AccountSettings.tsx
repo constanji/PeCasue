@@ -2,7 +2,7 @@ import { useState, memo } from 'react';
 import { useRecoilState } from 'recoil';
 import { useNavigate } from 'react-router-dom';
 import * as Select from '@ariakit/react/select';
-import { FileText, LogOut, Settings as SettingsIcon, Database } from 'lucide-react';
+import { FileText, LogOut, Settings as SettingsIcon, Database, BarChart3 } from 'lucide-react';
 import { LinkIcon, GearIcon, DropdownMenuSeparator, Avatar } from '@because/client';
 import { SystemRoles } from '@because/data-provider';
 import { useGetStartupConfig, useGetUserBalance } from '~/data-provider';
@@ -108,6 +108,14 @@ function AccountSettings() {
             >
               <Database className="icon-md" aria-hidden="true" />
               项目管理
+            </Select.SelectItem>
+            <Select.SelectItem
+              value=""
+              onClick={() => navigate('/benchmark')}
+              className="select-item text-sm"
+            >
+              <BarChart3 className="icon-md" aria-hidden="true" />
+              基准测试
             </Select.SelectItem>
           </>
         )}

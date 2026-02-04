@@ -28,6 +28,7 @@ const keys = require('./keys');
 const user = require('./user');
 const mcp = require('./mcp');
 const rag = require('./rag');
+const benchmark = require('./benchmark');
 
 module.exports = {
   mcp,
@@ -60,4 +61,5 @@ module.exports = {
   staticRoute,
   accessPermissions,
   rag,
+  benchmark,
 };
