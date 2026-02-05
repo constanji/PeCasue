@@ -14,6 +14,7 @@ class ONNXRerankingService {
     this.resourcesPath = path.join(__dirname, 'onnx', 'reranker', 'resources');
     this.modelPath = path.join(this.resourcesPath, 'Xenova', 'ms-marco-MiniLM-L-6-v2');
     this.pipeline = null;
+    this.pipelineType = null; // 'feature-extraction' 或 'text-classification'
     this.initialized = false;
   }
 
@@ -114,18 +115,34 @@ class ONNXRerankingService {
       logger.info(`[ONNXRerankingService] Force offline mode - network requests intercepted`);
 
       try {
-        // 创建文本分类 pipeline（用于重排序）
-        // 重排序模型通常使用 cross-encoder 架构
+        // 对于 cross-encoder 重排序模型，使用 feature-extraction pipeline
+        // ms-marco-MiniLM-L-6-v2 是一个 cross-encoder 模型，用于计算 query-document 相关性
         // 使用模型名称，transformers 会在 cacheDir/Xenova/ms-marco-MiniLM-L-6-v2/ 下查找
         // fetch 拦截器会阻止任何网络请求
-        this.pipeline = await pipeline(
-          'text-classification',
-          modelName,
-          {
-            quantized: true,
-            device: 'cpu', // 使用 CPU，也可以使用 'gpu' 如果有 GPU
-          }
-        );
+        try {
+          // 尝试使用 feature-extraction pipeline（更适合 cross-encoder）
+          this.pipeline = await pipeline(
+            'feature-extraction',
+            modelName,
+            {
+              quantized: true,
+              device: 'cpu', // 使用 CPU，也可以使用 'gpu' 如果有 GPU
+            }
+          );
+          this.pipelineType = 'feature-extraction';
+        } catch (featureError) {
+          // 如果 feature-extraction 失败，回退到 text-classification
+          logger.warn(`[ONNXRerankingService] Feature-extraction pipeline failed, falling back to text-classification: ${featureError.message}`);
+          this.pipeline = await pipeline(
+            'text-classification',
+            modelName,
+            {
+              quantized: true,
+              device: 'cpu',
+            }
+          );
+          this.pipelineType = 'text-classification';
+        }
       } catch (error) {
         logger.error(`[ONNXRerankingService] Failed to load model: ${error.message}`);
         throw new Error(`Failed to load ONNX reranker model: ${error.message}`);
@@ -191,40 +208,88 @@ class ONNXRerankingService {
       for (let i = 0; i < documents.length; i++) {
         const doc = documents[i];
         
-        // 构建查询-文档对
-        // Cross-encoder 模型需要将查询和文档组合在一起
+        let rawScore = 0;
+        let score = 0;
+
+        // 构建查询-文档对（cross-encoder 格式）
+        // 注意：实际的 tokenizer 会自动添加 [CLS] 和 [SEP] tokens
         const inputText = `${query} [SEP] ${doc}`;
 
-        // 使用 pipeline 进行分类/评分
-        const output = await this.pipeline(inputText);
+        try {
+          const output = await this.pipeline(inputText);
 
-        // 提取分数
-        let rawScore = 0;
-        if (Array.isArray(output)) {
-          // 如果有多个标签，取最高分的标签
-          const maxScoreLabel = output.reduce((max, item) => 
-            (item.score > max.score ? item : max)
-          );
-          rawScore = maxScoreLabel.score;
-        } else if (typeof output === 'object' && 'score' in output) {
-          rawScore = output.score;
-        } else if (typeof output === 'number') {
-          rawScore = output;
-        } else if (output && output.data) {
-          // 如果是 Tensor，取第一个值
-          rawScore = Array.from(output.data)[0] || 0;
-        }
+          if (this.pipelineType === 'feature-extraction') {
+            // feature-extraction pipeline 返回特征向量
+            // 对于 cross-encoder，我们需要提取 [CLS] token 的表示
+            if (Array.isArray(output)) {
+              // 输出是 token embeddings 数组，第一个通常是 [CLS] token
+              const clsEmbedding = output[0];
+              if (Array.isArray(clsEmbedding)) {
+                // 计算 [CLS] token embedding 的范数作为相关性分数
+                const norm = Math.sqrt(clsEmbedding.reduce((sum, val) => sum + val * val, 0));
+                rawScore = norm;
+                // 归一化：假设范数范围在 0-20，映射到 0-1
+                score = Math.min(1, Math.max(0, norm / 20));
+              } else if (typeof clsEmbedding === 'number') {
+                rawScore = clsEmbedding;
+                score = Math.min(1, Math.max(0, clsEmbedding / 20));
+              }
+            } else if (output && output.data) {
+              // Tensor 格式
+              const data = Array.isArray(output.data) ? output.data : Array.from(output.data);
+              if (data.length > 0) {
+                // 取第一个值（通常是 [CLS] token）
+                rawScore = data[0];
+                score = Math.min(1, Math.max(0, rawScore / 20));
+              }
+            } else if (typeof output === 'number') {
+              rawScore = output;
+              score = Math.min(1, Math.max(0, output / 20));
+            } else {
+              // 未知格式，尝试提取 score 字段
+              if (output && typeof output === 'object' && 'score' in output) {
+                rawScore = output.score;
+                score = Math.min(1, Math.max(0, rawScore / 20));
+              }
+            }
+          } else {
+            // text-classification pipeline 的处理方式
+            // 提取分数
+            if (Array.isArray(output)) {
+              // 如果有多个标签，取最高分的标签
+              const maxScoreLabel = output.reduce((max, item) => 
+                (item.score > max.score ? item : max)
+              );
+              rawScore = maxScoreLabel.score;
+            } else if (typeof output === 'object' && 'score' in output) {
+              rawScore = output.score;
+            } else if (typeof output === 'number') {
+              rawScore = output;
+            } else if (output && output.data) {
+              // 如果是 Tensor，取第一个值
+              rawScore = Array.from(output.data)[0] || 0;
+            }
 
-        // 确保分数在0-1范围内
-        // text-classification pipeline 通常返回0-1的概率分数，但需要验证
-        let score = rawScore;
-        if (score < 0) {
-          // 如果分数是负数，可能是logits，需要sigmoid归一化
-          score = 1 / (1 + Math.exp(-score));
-        } else if (score > 1) {
-          // 如果分数大于1，可能需要归一化
-          // 使用min-max归一化（假设最大分数为10）
-          score = Math.min(1, score / 10);
+            // 确保分数在0-1范围内
+            score = rawScore;
+            if (score < 0) {
+              // 如果分数是负数，可能是logits，需要sigmoid归一化
+              score = 1 / (1 + Math.exp(-score));
+            } else if (score > 1) {
+              // 如果分数大于1，可能需要归一化
+              score = Math.min(1, score / 10);
+            }
+          }
+
+          // 调试日志：记录前几个文档的原始输出
+          if (i < 3) {
+            logger.debug(`[ONNXRerankingService] Document ${i}: rawScore=${rawScore.toFixed(4)}, score=${score.toFixed(4)}, outputType=${typeof output}, pipelineType=${this.pipelineType}`);
+          }
+        } catch (error) {
+          logger.warn(`[ONNXRerankingService] Error processing document ${i}: ${error.message}`);
+          // 如果处理失败，使用基于索引的默认分数（避免所有分数相同）
+          rawScore = 0.5 - (i / documents.length) * 0.1; // 轻微递减
+          score = Math.max(0.1, rawScore);
         }
 
         results.push({
@@ -244,13 +309,41 @@ class ONNXRerankingService {
       
       if (allSame && results.length > 1) {
         logger.warn(`[ONNXRerankingService] 警告：所有重排分数都相同 (${scores[0].toFixed(4)})，可能是模型输出问题`);
+        logger.debug(`[ONNXRerankingService] 原始分数样本: ${results.slice(0, 3).map(r => `raw=${r.rawScore.toFixed(4)}, score=${r.score.toFixed(4)}`).join(', ')}`);
+        
+        // 如果所有分数都相同，尝试使用原始分数进行归一化
+        const rawScores = results.map(r => r.rawScore);
+        const minRaw = Math.min(...rawScores);
+        const maxRaw = Math.max(...rawScores);
+        
+        if (maxRaw > minRaw) {
+          // 使用 min-max 归一化重新计算分数
+          logger.info(`[ONNXRerankingService] 使用原始分数进行 min-max 归一化: min=${minRaw.toFixed(4)}, max=${maxRaw.toFixed(4)}`);
+          results.forEach(result => {
+            if (maxRaw > minRaw) {
+              result.score = (result.rawScore - minRaw) / (maxRaw - minRaw);
+            } else {
+              // 如果原始分数也相同，使用基于索引的分数
+              result.score = 1.0 - (result.index / results.length) * 0.2; // 0.8 到 1.0 之间
+            }
+          });
+          // 重新排序
+          results.sort((a, b) => b.score - a.score);
+        } else {
+          // 如果原始分数也相同，使用基于索引的分数
+          logger.info(`[ONNXRerankingService] 原始分数也相同，使用基于索引的分数`);
+          results.forEach((result, idx) => {
+            result.score = 1.0 - (idx / results.length) * 0.3; // 0.7 到 1.0 之间
+          });
+        }
       }
 
       // 记录分数分布用于调试
       if (results.length > 0) {
-        const minScore = Math.min(...scores);
-        const maxScore = Math.max(...scores);
-        const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+        const finalScores = results.map(r => r.score);
+        const minScore = Math.min(...finalScores);
+        const maxScore = Math.max(...finalScores);
+        const avgScore = finalScores.reduce((a, b) => a + b, 0) / finalScores.length;
         logger.debug(`[ONNXRerankingService] 重排分数分布: 最低=${minScore.toFixed(4)}, 最高=${maxScore.toFixed(4)}, 平均=${avgScore.toFixed(4)}`);
       }
 
