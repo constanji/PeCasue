@@ -116,9 +116,7 @@ class ONNXRerankingService {
 
       try {
         // 对于 cross-encoder 重排序模型，使用 feature-extraction pipeline
-        // ms-marco-MiniLM-L-6-v2 是一个 cross-encoder 模型，用于计算 query-document 相关性
-        // 使用模型名称，transformers 会在 cacheDir/Xenova/ms-marco-MiniLM-L-6-v2/ 下查找
-        // fetch 拦截器会阻止任何网络请求
+        // ms-marco-MiniLM-L-6-v2 是 cross-encoder 模型，用于计算 query-document 相关性
         try {
           // 尝试使用 feature-extraction pipeline（更适合 cross-encoder）
           this.pipeline = await pipeline(
@@ -126,7 +124,7 @@ class ONNXRerankingService {
             modelName,
             {
               quantized: true,
-              device: 'cpu', // 使用 CPU，也可以使用 'gpu' 如果有 GPU
+              device: 'cpu', // 使用 CPU，也可以使用 'gpu'
             }
           );
           this.pipelineType = 'feature-extraction';

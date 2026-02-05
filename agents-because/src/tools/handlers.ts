@@ -144,7 +144,7 @@ export const handleToolCalls = async (
   graph?: StandardGraph | MultiAgentGraph
 ): Promise<void> => {
   if (!graph || !metadata) {
-    console.warn(`Graph or metadata not found in ${event} event`);
+    console.warn('Graph or metadata not found in handleToolCalls');
     return;
   }
 
