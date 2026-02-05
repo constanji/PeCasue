@@ -131,6 +131,8 @@ export abstract class Graph<
   stepKeyIds: Map<string, string[]> = new Map<string, string[]>();
   contentIndexMap: Map<string, number> = new Map();
   toolCallStepIds: Map<string, string> = new Map();
+  /** Map of tool call index -> {name, id} for recovering missing info in streaming (dashscope issue) */
+  toolCallInfoByIndex: Map<number, { name: string; id: string }> = new Map();
   signal?: AbortSignal;
   /** Set of invoked tool call IDs from non-message run steps completed mid-run, if any */
   invokedToolIds?: Set<string>;
@@ -190,6 +192,7 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
     }
     this.stepKeyIds = resetIfNotEmpty(this.stepKeyIds, new Map());
     this.toolCallStepIds = resetIfNotEmpty(this.toolCallStepIds, new Map());
+    this.toolCallInfoByIndex = resetIfNotEmpty(this.toolCallInfoByIndex, new Map());
     this.messageIdsByStepKey = resetIfNotEmpty(
       this.messageIdsByStepKey,
       new Map()
@@ -454,6 +457,7 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
       tools: (currentTools as t.GenericTool[] | undefined) ?? [],
       toolMap: currentToolMap,
       toolCallStepIds: this.toolCallStepIds,
+      toolCallInfoByIndex: this.toolCallInfoByIndex,
       errorHandler: (data, metadata) =>
         StandardGraph.handleToolCallErrorStatic(this, data, metadata),
       toolRegistry: agentContext?.toolRegistry,
@@ -1007,12 +1011,24 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
     const { tool_call_id } = output;
     const stepId = this.toolCallStepIds.get(tool_call_id) ?? '';
     if (!stepId) {
-      throw new Error(`No stepId found for tool_call_id ${tool_call_id}`);
+      // 如果找不到 stepId，可能是程序化工具调用或异步执行的情况
+      // 记录警告但不抛出错误，避免中断流程
+      console.warn(
+        `No stepId found for tool_call_id ${tool_call_id}. ` +
+        `This may occur with programmatic tool calls or async executions. ` +
+        `Tool name: ${output.name ?? 'unknown'}`
+      );
+      return;
     }
 
     const runStep = this.getRunStep(stepId);
     if (!runStep) {
-      throw new Error(`No run step found for stepId ${stepId}`);
+      // 如果找不到 runStep，记录警告但不抛出错误
+      console.warn(
+        `No run step found for stepId ${stepId} (tool_call_id: ${tool_call_id}). ` +
+        `Tool name: ${output.name ?? 'unknown'}`
+      );
+      return;
     }
 
     const dispatchedOutput =
@@ -1065,14 +1081,26 @@ export class StandardGraph extends Graph<t.BaseGraphState, t.GraphNode> {
 
     const stepId = graph.toolCallStepIds.get(data.id) ?? '';
     if (!stepId) {
-      throw new Error(`No stepId found for tool_call_id ${data.id}`);
+      // 如果找不到 stepId，可能是程序化工具调用或异步执行的情况
+      // 记录警告但不抛出错误，避免中断流程
+      console.warn(
+        `No stepId found for tool_call_id ${data.id} in error handler. ` +
+        `This may occur with programmatic tool calls or async executions. ` +
+        `Tool name: ${data.name ?? 'unknown'}`
+      );
+      return;
     }
 
     const { name, input: args, error } = data;
 
     const runStep = graph.getRunStep(stepId);
     if (!runStep) {
-      throw new Error(`No run step found for stepId ${stepId}`);
+      // 如果找不到 runStep，记录警告但不抛出错误
+      console.warn(
+        `No run step found for stepId ${stepId} (tool_call_id: ${data.id}) in error handler. ` +
+        `Tool name: ${data.name ?? 'unknown'}`
+      );
+      return;
     }
 
     const tool_call: t.ProcessedToolCall = {
