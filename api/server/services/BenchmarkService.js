@@ -2,6 +2,11 @@ const fs = require('fs').promises;
 const path = require('path');
 const ModelClient = require('./ModelClient');
 const EvaluationService = require('./EvaluationService');
+const { isAgentsEndpoint, EModelEndpoint, Constants } = require('@because/data-provider');
+const AgentClient = require('../controllers/agents/client');
+const { initializeClient } = require('../services/Endpoints/agents/initialize');
+const { getAppConfig } = require('../services/Config');
+const { v4: uuidv4 } = require('uuid');
 
 function getTasks() {
   const BenchmarkController = require('../controllers/BenchmarkController');
@@ -15,6 +20,7 @@ function getTasks() {
 class BenchmarkService {
   static currentQAType = null;
   static knowledgeLoggedDbIds = new Set();
+  static knowledgeCache = new Map(); // 缓存知识库内容，避免重复加载
 
   static async runBenchmarkTask(taskId, config, benchmarkRoot, resultsDirOverride) {
     const root = benchmarkRoot || path.join(__dirname, '../../benchmark');
@@ -27,6 +33,7 @@ class BenchmarkService {
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
     BenchmarkService.knowledgeLoggedDbIds.clear();
+    BenchmarkService.knowledgeCache.clear(); // 清空知识库缓存
     if (!Array.isArray(task.statusLogs)) task.statusLogs = [];
 
     const pushLog = (msg) => {
@@ -45,23 +52,62 @@ class BenchmarkService {
       task.total = dataset.length;
       tasksMap.set(taskId, task);
 
-      if (!config.endpointConfig.baseURL) {
-        throw new Error('Endpoint baseURL is missing. Please check your endpoint configuration.');
-      }
-      if (!config.endpointConfig.apiKey) {
-        throw new Error('Endpoint API key is missing. Please check your .env file or endpoint configuration.');
-      }
+      // 检查是否为 agents 端点
+      const isAgents = isAgentsEndpoint(config.endpointConfig.name);
 
-      pushLog(`[BenchmarkService] 任务 ${taskId} 开始 | 端点: ${config.endpointConfig.name} | 模型: ${config.modelConfig.model} | 数据集: ${config.databaseName || '全部'} (${dataset.length} 题) | SQL方言: ${config.sqlDialect}`);
+      // 对于 agents 端点，不需要 baseURL 和 apiKey
+      if (!isAgents) {
+        if (!config.endpointConfig.baseURL) {
+          throw new Error('Endpoint baseURL is missing. Please check your endpoint configuration.');
+        }
+        if (!config.endpointConfig.apiKey) {
+          throw new Error('Endpoint API key is missing. Please check your .env file or endpoint configuration.');
+        }
+      }
+      const endpointType = isAgents ? '智能体 (Agents)' : '模型 (Model)';
+      pushLog(`[BenchmarkService] 任务 ${taskId} 开始 | 端点: ${config.endpointConfig.name} (${endpointType}) | 模型: ${config.modelConfig.model} | 数据集: ${config.databaseName || '全部'} (${dataset.length} 题) | SQL方言: ${config.sqlDialect}`);
       const instruction = config.toolsConfig?.useKnowledge
         ? `知识库: 开, QA类型: ${config.toolsConfig?.qaType || '无'}`
         : '知识库: 关';
       pushLog(`[BenchmarkService] Instruction: ${instruction}`);
 
-      const modelClient = new ModelClient(config.endpointConfig, config.modelConfig);
+      let modelClient = null;
+      let agentClient = null;
+      let mockReq = null;
+      let mockRes = null;
+
+      if (isAgents) {
+        // 初始化智能体客户端
+        const appConfig = await getAppConfig({ role: 'USER' });
+        mockReq = this.createMockRequest(config, appConfig, config.userId);
+        mockRes = this.createMockResponse();
+        const { client } = await initializeClient({
+          req: mockReq,
+          res: mockRes,
+          endpointOption: {
+            endpoint: EModelEndpoint.agents,
+            agent: Promise.resolve(config.agentConfig.agent),
+            model_parameters: config.agentConfig.agent.model_parameters,
+          },
+        });
+        agentClient = client;
+      } else {
+        // 初始化模型客户端
+        modelClient = new ModelClient(config.endpointConfig, config.modelConfig);
+      }
+
       const predictions = [];
 
       for (let i = 0; i < dataset.length; i++) {
+        // 检查是否已取消
+        const currentTask = tasksMap.get(taskId);
+        if (currentTask?.cancelled) {
+          pushLog(`[BenchmarkService] 任务已取消，停止处理`);
+          task.status = 'cancelled';
+          tasksMap.set(taskId, task);
+          break;
+        }
+
         const item = dataset[i];
         const itemStartTime = Date.now();
         task.currentItem = item.question_id || `item_${i + 1}`;
@@ -69,7 +115,9 @@ class BenchmarkService {
         tasksMap.set(taskId, task);
 
         try {
-          const predictedSQL = await this.generateSQL(modelClient, item, config.sqlDialect, config.toolsConfig, knowledgeDir);
+          const predictedSQL = isAgents
+            ? await this.generateSQLWithAgent(agentClient, item, config.sqlDialect, config.toolsConfig, knowledgeDir, mockReq)
+            : await this.generateSQL(modelClient, item, config.sqlDialect, config.toolsConfig, knowledgeDir);
           const itemDuration = Date.now() - itemStartTime;
           predictions.push({
             index: i,
@@ -180,6 +228,86 @@ class BenchmarkService {
     return this.extractSQL(response);
   }
 
+  static async generateSQLWithAgent(agentClient, item, sqlDialect, toolsConfig, knowledgeDir, req) {
+    const useKnowledge = toolsConfig?.useKnowledge || false;
+    const qaType = toolsConfig?.qaType || null;
+    BenchmarkService.currentQAType = qaType;
+
+    const prompt = await this.buildAgentPrompt(item, sqlDialect, useKnowledge, knowledgeDir);
+    
+    // 调用智能体的 sendMessage 方法
+    const conversationId = uuidv4();
+    const responseMessageId = uuidv4();
+    
+    const messageOptions = {
+      user: req.user?.id,
+      conversationId,
+      parentMessageId: Constants.NO_PARENT,
+      responseMessageId,
+      abortController: new AbortController(),
+      progressOptions: {
+        res: null, // 不需要流式响应
+      },
+    };
+
+    const response = await agentClient.sendMessage(prompt, messageOptions);
+    
+    // 从响应中提取 SQL
+    const responseText = this.extractTextFromAgentResponse(response);
+    return this.extractSQL(responseText);
+  }
+
+  static extractTextFromAgentResponse(response) {
+    // 从智能体响应中提取文本内容
+    if (response.text) {
+      return response.text;
+    }
+    if (response.content && typeof response.content === 'string') {
+      return response.content;
+    }
+    if (Array.isArray(response.content)) {
+      return response.content
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          if (part.text) return part.text;
+          return '';
+        })
+        .join('');
+    }
+    return JSON.stringify(response);
+  }
+
+  static createMockRequest(config, appConfig, userId) {
+    // 创建一个模拟的 req 对象用于智能体初始化
+    // 使用传入的用户ID，如果没有则使用当前请求的用户ID
+    if (!userId) {
+      throw new Error('用户ID是必需的，请确保在配置中传递 userId');
+    }
+    return {
+      user: {
+        id: userId,
+        role: 'USER',
+      },
+      config: appConfig || {
+        endpoints: {
+          [EModelEndpoint.agents]: {},
+        },
+      },
+      body: {},
+    };
+  }
+
+  static createMockResponse() {
+    // 创建一个模拟的 res 对象
+    return {
+      on: () => {},
+      write: () => {},
+      end: () => {},
+      status: () => ({ json: () => {} }),
+      json: () => {},
+    };
+  }
+
   static async buildPrompt(item, sqlDialect, useKnowledge, knowledgeDir) {
     const schemaPrompt = await this.getSchemaPrompt(item.db_id, sqlDialect);
     const question = item.question;
@@ -187,10 +315,19 @@ class BenchmarkService {
 
     let knowledgeContent = '';
     if (useKnowledge && knowledgeDir) {
-      knowledgeContent = await this.loadKnowledgeFromDirectory(knowledgeDir, item.db_id);
-      if (knowledgeContent && !BenchmarkService.knowledgeLoggedDbIds.has(item.db_id)) {
-        BenchmarkService.knowledgeLoggedDbIds.add(item.db_id);
-        console.log(`[BenchmarkService] 知识库已加载 db_id=${item.db_id} 长度=${knowledgeContent.length} 字符`);
+      // 使用缓存避免重复加载
+      const cacheKey = `${item.db_id}_${BenchmarkService.currentQAType || 'none'}`;
+      if (BenchmarkService.knowledgeCache.has(cacheKey)) {
+        knowledgeContent = BenchmarkService.knowledgeCache.get(cacheKey);
+      } else {
+        knowledgeContent = await this.loadKnowledgeFromDirectory(knowledgeDir, item.db_id);
+        if (knowledgeContent) {
+          BenchmarkService.knowledgeCache.set(cacheKey, knowledgeContent);
+          if (!BenchmarkService.knowledgeLoggedDbIds.has(item.db_id)) {
+            BenchmarkService.knowledgeLoggedDbIds.add(item.db_id);
+            console.log(`[BenchmarkService] 知识库已加载 db_id=${item.db_id} 长度=${knowledgeContent.length} 字符`);
+          }
+        }
       }
     }
 
@@ -217,6 +354,57 @@ Do not include any comments in your response.
 Do not need to start with the symbol \`\`\`
 You only need to return the result ${sqlDialect} SQL code
 start from SELECT`;
+  }
+
+  static async buildAgentPrompt(item, sqlDialect, useKnowledge, knowledgeDir) {
+    // 使用 Python 脚本生成智能体提示词
+    const { spawn } = require('child_process');
+    const { promisify } = require('util');
+    const schemaPrompt = await this.getSchemaPrompt(item.db_id, sqlDialect);
+    const question = item.question;
+    const evidence = item.evidence || '';
+
+    let knowledgeContent = '';
+    if (useKnowledge && knowledgeDir) {
+      // 使用缓存避免重复加载
+      const cacheKey = `${item.db_id}_${BenchmarkService.currentQAType || 'none'}`;
+      if (BenchmarkService.knowledgeCache.has(cacheKey)) {
+        knowledgeContent = BenchmarkService.knowledgeCache.get(cacheKey);
+      } else {
+        knowledgeContent = await this.loadKnowledgeFromDirectory(knowledgeDir, item.db_id);
+        if (knowledgeContent) {
+          BenchmarkService.knowledgeCache.set(cacheKey, knowledgeContent);
+          if (!BenchmarkService.knowledgeLoggedDbIds.has(item.db_id)) {
+            BenchmarkService.knowledgeLoggedDbIds.add(item.db_id);
+            console.log(`[BenchmarkService] 知识库已加载 db_id=${item.db_id} 长度=${knowledgeContent.length} 字符`);
+          }
+        }
+      }
+    }
+
+    // 构建智能体提示词（使用中文，更适合智能体理解）
+    let knowledgeSection = '';
+    if (knowledgeContent) {
+      const maxKnowledgeLength = 8000;
+      const truncatedKnowledge =
+        knowledgeContent.length > maxKnowledgeLength
+          ? knowledgeContent.substring(0, maxKnowledgeLength) + '\n\n...(知识库内容已截断)'
+          : knowledgeContent;
+      knowledgeSection = `\n# 知识库:\n${truncatedKnowledge}\n`;
+    }
+
+    return `${schemaPrompt}${knowledgeSection}
+
+请使用有效的 ${sqlDialect} SQL${evidence ? ' 并理解外部知识' : ''}${useKnowledge ? ' 结合知识库' : ''}，回答以下关于上述表的问题。
+问题: ${question}
+${evidence ? `外部知识: ${evidence}` : ''}
+
+请使用可用的工具（如 database_schema、text-to-sql、sql_executor 等）来完成以下任务：
+1. 首先使用 database_schema 工具获取数据库表结构信息
+2. 然后使用 text-to-sql 工具将自然语言问题转换为 ${sqlDialect} SQL 查询
+3. 如果需要，可以使用 sql_executor 工具执行 SQL 并查看结果
+
+最终请返回生成的 ${sqlDialect} SQL 代码，以 SELECT 开头。`;
   }
 
   static async loadKnowledgeFromDirectory(dir, dbId) {

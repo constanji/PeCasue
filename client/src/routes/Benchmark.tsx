@@ -228,7 +228,7 @@ export default function Benchmark() {
             })),
           );
         }
-        if (data.status === 'completed' || data.status === 'failed') clearInterval(interval);
+        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') clearInterval(interval);
       } catch (error) {
         console.error('Error polling task status:', error);
       }
@@ -473,8 +473,8 @@ export default function Benchmark() {
                       <div className="rounded-md border border-border-light bg-surface-primary p-3">
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-text-secondary">状态:</span>
-                          <span className={`font-medium ${taskStatus.status === 'completed' ? 'text-green-600' : taskStatus.status === 'failed' ? 'text-red-600' : 'text-text-primary'}`}>
-                            {taskStatus.status === 'completed' ? '已完成' : taskStatus.status === 'failed' ? '失败' : taskStatus.status === 'running' ? '运行中' : taskStatus.status}
+                          <span className={`font-medium ${taskStatus.status === 'completed' ? 'text-green-600' : taskStatus.status === 'failed' ? 'text-red-600' : taskStatus.status === 'cancelled' ? 'text-yellow-600' : 'text-text-primary'}`}>
+                            {taskStatus.status === 'completed' ? '已完成' : taskStatus.status === 'failed' ? '失败' : taskStatus.status === 'cancelled' ? '已取消' : taskStatus.status === 'running' ? '运行中' : taskStatus.status}
                           </span>
                         </div>
                         <div className="mt-2 flex items-center justify-between text-sm">
@@ -491,6 +491,38 @@ export default function Benchmark() {
                           <div className="h-full bg-primary transition-all duration-300" style={{ width: `${taskStatus.progress || 0}%` }} />
                         </div>
                       </div>
+                      {taskStatus.status === 'running' && (
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!taskId) return;
+                              try {
+                                const response = await fetch(`/api/benchmark/task/${taskId}/cancel`, {
+                                  method: 'POST',
+                                  headers: authHeaders,
+                                  credentials: 'include',
+                                });
+                                if (response.ok) {
+                                  setStatusLogs((prev) => [
+                                    ...prev,
+                                    { time: new Date().toLocaleTimeString(), message: '⏹️ 已请求终止测试', type: 'warning' },
+                                  ]);
+                                } else {
+                                  const data = await response.json();
+                                  alert('终止失败: ' + (data.error || '未知错误'));
+                                }
+                              } catch (error: any) {
+                                console.error('Error cancelling task:', error);
+                                alert('终止失败: ' + (error?.message || String(error)));
+                              }
+                            }}
+                            className="btn btn-neutral border-red-500/20 bg-red-500/5 text-red-600 hover:bg-red-500/10 rounded-md px-3 py-2 text-sm"
+                          >
+                            ⏹️ 终止测试
+                          </button>
+                        </div>
+                      )}
                       {statusLogs.length > 0 && (
                         <div className="rounded-md border border-border-light bg-surface-primary p-3">
                           <div className="mb-2 flex items-center justify-between">

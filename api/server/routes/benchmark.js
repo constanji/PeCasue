@@ -9,6 +9,7 @@ router.use(checkAdmin);
 
 router.post('/run', BenchmarkController.runBenchmark);
 router.get('/task/:taskId', BenchmarkController.getTaskStatus);
+router.post('/task/:taskId/cancel', BenchmarkController.cancelTask);
 router.get('/result/:taskId', BenchmarkController.getResult);
 router.get('/sql-comparison/:taskId', BenchmarkController.getSQLComparison);
 router.get('/tasks', BenchmarkController.listTasks);
