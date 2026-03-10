@@ -157,7 +157,7 @@ export default function AgentsList({ toggleNav }: AgentsListProps) {
                 return (
                   <div
                     key={dataSource._id}
-                    className="flex items-center gap-1 group"
+                    className="flex items-center gap-1 group min-w-0"
                   >
                     <button
                       onClick={() => {
@@ -165,7 +165,7 @@ export default function AgentsList({ toggleNav }: AgentsListProps) {
                         setSelectedDataSourceId(dataSource._id);
                       }}
                       className={cn(
-                        'flex flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors',
+                        'flex flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors min-w-0 overflow-hidden',
                         isSelected
                           ? 'text-text-primary'
                           : 'text-text-secondary hover:bg-surface-hover',
@@ -173,14 +173,14 @@ export default function AgentsList({ toggleNav }: AgentsListProps) {
                       aria-label={dataSource.name ? `选择数据源: ${dataSource.name}` : '选择数据源'}
                     >
                       <Database className="h-4 w-4 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        <div className="flex items-center gap-2 min-w-0">
                           <span className="truncate text-sm font-medium">{dataSource.name}</span>
                           {isSelected && (
                             <CheckCircle2 className="h-3 w-3 flex-shrink-0 text-green-600" />
                           )}
                         </div>
-                        <div className="text-xs text-text-tertiary">
+                        <div className="truncate text-xs text-text-tertiary">
                           {dataSource.type === 'mysql' ? 'MySQL' : 'PostgreSQL'} · {dataSource.database}
                         </div>
                       </div>

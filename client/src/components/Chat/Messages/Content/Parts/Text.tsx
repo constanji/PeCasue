@@ -43,13 +43,15 @@ const TextPart = memo(({ text, isCreatedByUser, showCursor, attachments }: TextP
     return attachments
       .filter((attachment) => attachment.type === 'ui_resources')
       .flatMap((attachment) => {
-        const uiResourceData = attachment.ui_resources;
+        const uiResourceData = attachment.ui_resources as unknown;
         if (Array.isArray(uiResourceData)) {
-          return uiResourceData;
-        } else if (uiResourceData && 'data' in uiResourceData && Array.isArray(uiResourceData.data)) {
-          return uiResourceData.data;
+          return uiResourceData as UIResource[];
         }
-        return [];
+        const container = uiResourceData as { data?: UIResource[] } | undefined;
+        if (container?.data && Array.isArray(container.data)) {
+          return container.data;
+        }
+        return [] as UIResource[];
       });
   }, [attachments]);
 

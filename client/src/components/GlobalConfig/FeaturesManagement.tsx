@@ -59,12 +59,19 @@ export default function FeaturesManagement({ startupConfig: propStartupConfig }:
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [config, setConfig] = useState<InterfaceConfig>({});
-  // 用于跟踪最近保存的配置，防止被旧值覆盖
   const savedConfigRef = useRef<InterfaceConfig | null>(null);
+  // 跟踪是否有未保存的本地修改，避免 refetch 时覆盖用户的开关切换
+  const isDirtyRef = useRef(false);
 
   // 从 startupConfig 加载配置
   useEffect(() => {
     if (startupConfig?.interface) {
+      // 用户有未保存的修改时，不覆盖本地配置（避免 refetch 覆盖开关切换）
+      if (isDirtyRef.current) {
+        setIsLoading(false);
+        return;
+      }
+
       const interfaceConfig = startupConfig.interface as InterfaceConfig;
       console.log('[FeaturesManagement] Loading config from startupConfig:', {
         customWelcome: interfaceConfig.customWelcome,
@@ -227,6 +234,8 @@ export default function FeaturesManagement({ startupConfig: propStartupConfig }:
         status: 'success',
       });
 
+      isDirtyRef.current = false;
+
       // 保存后，保持当前本地状态不变（用户刚刚输入的值就是最新的）
       // 不要立即用服务器返回的值覆盖，因为服务器可能返回缓存的旧值
       // 保存当前配置到 ref，用于后续比较
@@ -311,6 +320,7 @@ export default function FeaturesManagement({ startupConfig: propStartupConfig }:
 
   // 更新配置值
   const updateConfig = (key: keyof InterfaceConfig, value: any) => {
+    isDirtyRef.current = true;
     setConfig((prev) => ({
       ...prev,
       [key]: value,
@@ -319,6 +329,7 @@ export default function FeaturesManagement({ startupConfig: propStartupConfig }:
 
   // 更新嵌套配置值
   const updateNestedConfig = (parentKey: keyof InterfaceConfig, childKey: string, value: any) => {
+    isDirtyRef.current = true;
     setConfig((prev) => {
       const currentParent = prev[parentKey];
       const parentValue = currentParent && typeof currentParent === 'object' 
@@ -606,7 +617,7 @@ function ConfigModelSelectorContent({
     handleSelectSpec,
   } = useModelSelectorContext();
 
-  // 同步配置的默认值到 Context 的 selectedValues
+  // 同步配置的默认值到 Context 的 selectedValues（当父组件配置变化时）
   useEffect(() => {
     const expectedEndpoint = defaultEndpoint || '';
     const expectedModel = defaultModel || '';
@@ -619,6 +630,25 @@ function ConfigModelSelectorContent({
       });
     }
   }, [defaultEndpoint, defaultModel, setContextSelectedValues]);
+
+  // 配置切换：当用户通过选择器选择新的端点/模型时，同步到父组件
+  useEffect(() => {
+    const endpoint = contextSelectedValues.endpoint || '';
+    const model = contextSelectedValues.model || '';
+    const expectedEndpoint = defaultEndpoint || '';
+    const expectedModel = defaultModel || '';
+    if (endpoint !== expectedEndpoint || model !== expectedModel) {
+      onEndpointChange(endpoint);
+      onModelChange(model);
+    }
+  }, [
+    contextSelectedValues.endpoint,
+    contextSelectedValues.model,
+    defaultEndpoint,
+    defaultModel,
+    onEndpointChange,
+    onModelChange,
+  ]);
 
   // 使用 Context 的 selectedValues，这样选择器会正确显示
   const selectedValues = useMemo(() => {

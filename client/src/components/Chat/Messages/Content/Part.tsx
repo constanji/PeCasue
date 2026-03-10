@@ -10,6 +10,7 @@ import { memo } from 'react';
 import type { TMessageContentParts, TAttachment } from '@because/data-provider';
 import { OpenAIImageGen, EmptyText, Reasoning, ExecuteCode, AgentUpdate, Text } from './Parts';
 import { ErrorMessage } from './MessageContent';
+import { ChartRenderer, extractChartDataFromToolOutput } from './ChartRenderer';
 import RetrievalCall from './RetrievalCall';
 import AgentHandoff from './AgentHandoff';
 import CodeAnalyze from './CodeAnalyze';
@@ -98,6 +99,21 @@ const Part = memo(
 
       if (!toolCall) {
         return null;
+      }
+
+      const toolOutput = 'output' in toolCall && typeof toolCall.output === 'string' ? toolCall.output : '';
+      const chartData = toolOutput ? extractChartDataFromToolOutput(toolOutput) : null;
+      if (chartData) {
+        return (
+          <div className="w-full" style={{ minWidth: 0 }}>
+            <ChartRenderer
+              chartId={`inline-${chartData.chartId}`}
+              title={chartData.title}
+              data={chartData.data}
+              layout={chartData.layout}
+            />
+          </div>
+        );
       }
 
       const isToolCall =

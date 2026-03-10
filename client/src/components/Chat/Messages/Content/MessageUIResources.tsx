@@ -33,8 +33,13 @@ const MessageUIResources = memo(({ attachments, excludedToolCallIds }: MessageUI
         const uiResourceData = attachment[Tools.ui_resources];
         if (Array.isArray(uiResourceData)) {
           return uiResourceData;
-        } else if (uiResourceData && 'data' in uiResourceData && Array.isArray(uiResourceData.data)) {
-          return uiResourceData.data;
+        }
+        const uiResourceContainer =
+          uiResourceData != null && typeof uiResourceData === 'object'
+            ? (uiResourceData as { data?: UIResource[] })
+            : undefined;
+        if (Array.isArray(uiResourceContainer?.data)) {
+          return uiResourceContainer.data;
         }
         return [];
       });

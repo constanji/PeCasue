@@ -17,15 +17,14 @@ import { unicodeCitation } from '~/components/Web';
 import { code, a, p, img, chart } from './MarkdownComponents';
 import store from '~/store';
 import { preprocessChartMarkers, hasChartMarkers } from './ChartRenderer';
-import type { TAttachment } from '@because/data-provider';
 
 type TContentProps = {
   content: string;
   isLatestMessage: boolean;
-  attachments?: TAttachment[];
+  attachments?: unknown[];
 };
 
-const Markdown = memo(({ content = '', isLatestMessage, attachments }: TContentProps) => {
+const Markdown = memo(({ content = '', isLatestMessage }: TContentProps) => {
   const LaTeXParsing = useRecoilValue<boolean>(store.LaTeXParsing);
   const isInitializing = content === '';
 
@@ -41,13 +40,12 @@ const Markdown = memo(({ content = '', isLatestMessage, attachments }: TContentP
       processed = preprocessLaTeX(processed);
     }
 
-    // 处理图表标记
-    if (attachments && attachments.length > 0 && hasChartMarkers(processed)) {
-      processed = preprocessChartMarkers(processed, attachments);
+    if (hasChartMarkers(processed)) {
+      processed = preprocessChartMarkers(processed);
     }
 
     return processed;
-  }, [content, LaTeXParsing, isInitializing, attachments]);
+  }, [content, LaTeXParsing, isInitializing]);
 
   const rehypePlugins = useMemo(
     () => [
@@ -98,7 +96,7 @@ const Markdown = memo(({ content = '', isLatestMessage, attachments }: TContentP
                 a,
                 p,
                 img,
-                div: chart, // 将 chart 组件注册为 div 处理器
+                div: chart,
                 artifact: Artifact,
                 citation: Citation,
                 'highlighted-text': HighlightedText,

@@ -9,8 +9,6 @@ import { useCodeBlockContext, useMessageContext } from '~/Providers';
 import { handleDoubleClick } from '~/utils';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
-import { findChartDataFromAttachments, ChartRenderer } from './ChartRenderer';
-
 type TCodeProps = {
   inline?: boolean;
   className?: string;
@@ -188,15 +186,28 @@ export const img: React.ElementType = memo(({ src, alt, title, className, style 
   return <img src={fixedSrc} alt={alt} title={title} className={className} style={style} />;
 });
 
-export const chart: React.ElementType = memo((props: any) => {
-  const { className, 'data-chart-id': chartId, 'data-title': title, children, ...otherProps } = props;
+/**
+ * chart-placeholder divs in markdown text simply display a visual indicator.
+ * The actual Plotly chart is rendered directly in ToolCallInfo from the tool output JSON
+ * (vanna-inspired approach: no attachment chain needed).
+ */
+export const chart: React.ElementType = memo((props: Record<string, unknown>) => {
+  const {
+    className,
+    'data-title': title,
+    children,
+    ...otherProps
+  } = props;
 
-  // 对于chart-placeholder，我们现在直接在TOOL_CALL中处理ui_resources，不再通过chart组件
-  // 所以这里直接返回null，完全不显示占位符
-  if (className && className.includes('chart-placeholder')) {
-    return null;
+  if (typeof className === 'string' && className.includes('chart-placeholder')) {
+    return (
+      <div className="my-2 flex items-center gap-2 rounded-md border border-border-light bg-surface-secondary px-3 py-2 text-sm text-text-secondary">
+        <span>📊</span>
+        <span>{typeof title === 'string' && title ? title : '图表'}</span>
+        <span className="text-xs text-text-tertiary">（见工具调用结果）</span>
+      </div>
+    );
   }
 
-  // 对于非 chart-placeholder 的 div 元素，返回正常的 div
-  return React.createElement('div', { className, ...otherProps }, children);
+  return React.createElement('div', { className, ...otherProps }, children as React.ReactNode);
 });

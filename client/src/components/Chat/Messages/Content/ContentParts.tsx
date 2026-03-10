@@ -13,6 +13,8 @@ import { mapAttachments } from '~/utils/map';
 import { EditTextPart } from './Parts';
 import Part from './Part';
 import MessageUIResources from './MessageUIResources';
+import { extractChartDataFromToolOutput } from './ChartRenderer';
+
 
 type ContentPartsProps = {
   content: Array<TMessageContentParts | undefined> | undefined;
@@ -128,8 +130,12 @@ const ContentParts = memo(
           return isBeforeFirstTool || isFinalSummary;
         }
 
-        // TOOL_CALL 仍然只在思维链侧边栏展示，不在主视图中展示
         if (part.type === ContentTypes.TOOL_CALL) {
+          const toolCall = part[ContentTypes.TOOL_CALL] as Agents.ToolCall | undefined;
+          const toolOutput = toolCall?.output;
+          if (typeof toolOutput === 'string' && extractChartDataFromToolOutput(toolOutput) !== null) {
+            return true;
+          }
           return false;
         }
 
@@ -225,8 +231,6 @@ const ContentParts = memo(
                     textAttachments = allTextAttachments;
                   }
                 }
-                // 移除了 fallback：不再在 TEXT part 中使用所有 attachments
-                // 所有未关联的 ui_resources 将在消息末尾统一渲染
               }
             }
 

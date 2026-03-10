@@ -650,6 +650,13 @@ export type TAttachmentMetadata = {
   [Tools.ui_resources]?: UIResource[];
   [Tools.web_search]?: SearchResultData;
   [Tools.file_search]?: SearchResultData;
+  _chartData?: {
+    marker?: string;
+    chartId?: string;
+    title?: string;
+    data?: unknown[];
+    layout?: unknown;
+  };
 };
 
 export type TAttachment =

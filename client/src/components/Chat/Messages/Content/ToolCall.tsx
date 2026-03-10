@@ -8,6 +8,7 @@ import { AttachmentGroup } from './Parts';
 import ToolCallInfo from './ToolCallInfo';
 import ProgressText from './ProgressText';
 import { logger, cn } from '~/utils';
+import { extractChartDataFromToolOutput } from './ChartRenderer';
 
 export default function ToolCall({
   initialProgress = 0.1,
@@ -29,14 +30,6 @@ export default function ToolCall({
   auth?: string;
   expires_at?: number;
 }) {
-  // 调试日志
-  console.log('[ToolCall] ========== ToolCall Rendered ==========');
-  console.log('[ToolCall] Name:', name);
-  console.log('[ToolCall] Args:', _args);
-  console.log('[ToolCall] Output:', output);
-  console.log('[ToolCall] Attachments:', attachments);
-  console.log('[ToolCall] Attachments count:', attachments?.length ?? 0);
-
   const localize = useLocalize();
   const [showInfo, setShowInfo] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -91,11 +84,13 @@ export default function ToolCall({
       const hasUiResources = attachments?.some(
         (att) => {
           if (att.type === Tools.ui_resources) {
-            const uiResourceData = att[Tools.ui_resources];
+            const uiResourceData = att[Tools.ui_resources] as unknown;
             if (Array.isArray(uiResourceData)) {
               return uiResourceData.length > 0;
-            } else if (uiResourceData && uiResourceData.data && Array.isArray(uiResourceData.data)) {
-              return uiResourceData.data.length > 0;
+            }
+            const container = uiResourceData as { data?: unknown[] } | undefined;
+            if (container?.data && Array.isArray(container.data)) {
+              return container.data.length > 0;
             }
           }
           return false;
@@ -104,6 +99,11 @@ export default function ToolCall({
       return hasArgs || hasOutput || hasUiResources;
     },
     [args, output, attachments],
+  );
+
+  const hasChartOutput = useMemo(
+    () => (typeof output === 'string' ? extractChartDataFromToolOutput(output) !== null : false),
+    [output],
   );
 
   const authDomain = useMemo(() => {
@@ -181,6 +181,12 @@ export default function ToolCall({
       resizeObserver.disconnect();
     };
   }, [showInfo, isAnimating]);
+
+  useEffect(() => {
+    if (hasChartOutput && hasInfo) {
+      setShowInfo(true);
+    }
+  }, [hasChartOutput, hasInfo]);
 
   if (!isLast && (!function_name || function_name.length === 0) && !output) {
     return null;

@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useLocalize } from '~/hooks';
 import { Tools } from '@because/data-provider';
 import { UIResourceRenderer } from '@mcp-ui/client';
 import UIResourceCarousel from './UIResourceCarousel';
 import type { TAttachment, UIResource } from '@because/data-provider';
+import { ChartRenderer, extractChartDataFromToolOutput } from './ChartRenderer';
 
 function OptimizedCodeBlock({ text, maxHeight = 320 }: { text: string; maxHeight?: number }) {
   return (
@@ -46,6 +47,11 @@ export default function ToolCallInfo({
     }
   };
 
+  const chartData = useMemo(
+    () => (typeof output === 'string' ? extractChartDataFromToolOutput(output) : null),
+    [output],
+  );
+
   let title =
     domain != null && domain
       ? localize('com_assistants_domain_info', { 0: domain })
@@ -61,36 +67,17 @@ export default function ToolCallInfo({
     attachments
       ?.filter((attachment) => attachment.type === Tools.ui_resources)
       .flatMap((attachment) => {
-        const uiResourceData = attachment[Tools.ui_resources];
-        // 处理不同的数据结构：直接数组或包含data属性的对象
+        const uiResourceData = attachment[Tools.ui_resources] as unknown;
         if (Array.isArray(uiResourceData)) {
-          return uiResourceData;
-        } else if (uiResourceData && uiResourceData.data && Array.isArray(uiResourceData.data)) {
-          return uiResourceData.data;
+          return uiResourceData as UIResource[];
         }
-        return [];
-      }) ?? [];
-
-  // 调试日志
-  React.useEffect(() => {
-    console.log('[ToolCallInfo] ========== Debug Info ==========');
-    console.log('[ToolCallInfo] Function:', function_name);
-    console.log('[ToolCallInfo] Attachments received:', attachments);
-    console.log('[ToolCallInfo] Attachments count:', attachments?.length ?? 0);
-    console.log('[ToolCallInfo] UI Resources extracted:', uiResources);
-    console.log('[ToolCallInfo] UI Resources count:', uiResources.length);
-    if (uiResources.length > 0) {
-      console.log('[ToolCallInfo] First UI Resource:', uiResources[0]);
-      console.log('[ToolCallInfo] UI Resource type:', uiResources[0].type);
-      console.log('[ToolCallInfo] UI Resource has text:', !!uiResources[0].text);
-      console.log('[ToolCallInfo] UI Resource text length:', uiResources[0].text?.length ?? 0);
-      console.log('[ToolCallInfo] UI Resource uri:', uiResources[0].uri);
-    } else {
-      console.log('[ToolCallInfo] No UI Resources found');
-    }
-    console.log('[ToolCallInfo] Output:', output);
-    console.log('[ToolCallInfo] =================================');
-  }, [attachments, uiResources, function_name, output]);
+        const container = uiResourceData as { data?: UIResource[] } | undefined;
+        if (container?.data && Array.isArray(container.data)) {
+          return container.data;
+        }
+        return [] as UIResource[];
+      })
+      .filter((resource) => !chartData || typeof resource.chartId !== 'string') ?? [];
 
   return (
     <div className="w-full p-2">
@@ -99,7 +86,15 @@ export default function ToolCallInfo({
         <div>
           <OptimizedCodeBlock text={formatText(input)} maxHeight={250} />
         </div>
-        {output && (
+        {chartData && (
+          <ChartRenderer
+            chartId={`tc-${chartData.chartId}`}
+            title={chartData.title}
+            data={chartData.data}
+            layout={chartData.layout}
+          />
+        )}
+        {output && !chartData && (
           <>
             <div className="my-2 text-sm font-medium text-text-primary">
               {localize('com_ui_result')}
@@ -109,14 +104,13 @@ export default function ToolCallInfo({
             </div>
           </>
         )}
-            {uiResources.length > 0 && (
+        {uiResources.length > 0 && (
           <>
-              <div className="my-2 text-sm font-medium text-text-primary">
-                {localize('com_ui_ui_resources')}
-              </div>
+            <div className="my-2 text-sm font-medium text-text-primary">
+              {localize('com_ui_ui_resources')}
+            </div>
             <div>
               {uiResources.length > 1 && <UIResourceCarousel uiResources={uiResources} />}
-
               {uiResources.length === 1 && (
                 <UIResourceRenderer
                   resource={uiResources[0]}

@@ -150,10 +150,24 @@ export class ToolNode<T = any> extends RunnableCallable<T, T> {
       ) {
         return output;
       } else {
+        const toolOutput =
+          output != null && typeof output === 'object'
+            ? (output as Record<string, unknown>)
+            : undefined;
         return new ToolMessage({
           status: 'success',
           name: tool.name,
-          content: typeof output === 'string' ? output : JSON.stringify(output),
+          content:
+            typeof output === 'string'
+              ? output
+              : typeof toolOutput?.content === 'string'
+                ? toolOutput.content
+                : JSON.stringify(output),
+          artifact:
+            toolOutput?.artifact != null &&
+            typeof toolOutput.artifact === 'object'
+              ? toolOutput.artifact
+              : undefined,
           tool_call_id: call.id!,
         });
       }

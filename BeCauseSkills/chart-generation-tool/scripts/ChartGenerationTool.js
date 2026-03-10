@@ -38,9 +38,10 @@ class ChartGenerationTool extends Tool {
         'time_series',
         'grouped_bar',
         'generic',
+        'auto',
       ])
       .optional()
-      .describe('指定图表类型（可选），如果不提供则自动选择'),
+      .describe('指定图表类型（可选），不提供或传 "auto" 则自动选择'),
     x_axis: z
       .string()
       .optional()
@@ -129,8 +130,8 @@ class ChartGenerationTool extends Tool {
       const columnTypes = this.dataAnalyzer.identifyColumnTypes(cleanedData);
       logger.info('[ChartGenerationTool] 列类型识别:', columnTypes);
 
-      // 3. 选择图表类型
-      let selectedChartType = chart_type;
+      // 3. 选择图表类型（"auto" 或不传时自动选择）
+      let selectedChartType = chart_type === 'auto' || !chart_type ? null : chart_type;
       if (!selectedChartType) {
         selectedChartType = this.chartTypeSelector.selectChartType(cleanedData, columnTypes);
         logger.info(`[ChartGenerationTool] 自动选择图表类型: ${selectedChartType}`);
@@ -236,6 +237,9 @@ class ChartGenerationTool extends Tool {
                 uri: chartUri,
                 text: plotlyHtml,
                 mimeType: 'text/html',
+                title: title,
+                data: chartConfig.data,
+                layout: chartConfig.layout,
                 chartId: chartId,
               },
             ],
@@ -245,6 +249,7 @@ class ChartGenerationTool extends Tool {
         _chartData: {
           marker: chartMarker,
           chartId: chartId,
+          title: title,
           data: chartConfig.data,
           layout: chartConfig.layout,
           // 注意：html 字段已移除，因为前端现在主要通过 artifact.ui_resources 来渲染

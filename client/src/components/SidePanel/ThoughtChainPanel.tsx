@@ -9,6 +9,7 @@ import type { MessageToolCalls, MessageContentItem } from '~/utils/parseDatServe
 import { mapAttachments } from '~/utils/map';
 import { useLocalize } from '~/hooks';
 import MarkdownLite from '~/components/Chat/Messages/Content/MarkdownLite';
+import { ChartRenderer, extractChartDataFromToolOutput } from '~/components/Chat/Messages/Content/ChartRenderer';
 
 const { Text } = Typography;
 
@@ -141,14 +142,17 @@ function ToolCallDetailContent({
   output?: string | null;
   domain: string | null;
   function_name: string;
-  // 使用宽松类型避免与 useLocalize 的类型签名不兼容
   localize: any;
 }) {
   const hasOutput = output != null && output.length > 0;
 
+  const chartData = useMemo(
+    () => (typeof output === 'string' && output.length > 0 ? extractChartDataFromToolOutput(output) : null),
+    [output],
+  );
+
   return (
     <div className="w-full space-y-3 overflow-hidden" style={{ maxWidth: '100%' }}>
-      {/* 参数 */}
       {args && (
         <div className="w-full overflow-hidden" style={{ maxWidth: '100%' }}>
           <Text type="secondary" className="mb-1 block text-xs">
@@ -160,8 +164,16 @@ function ToolCallDetailContent({
         </div>
       )}
 
-      {/* 输出结果 */}
-      {hasOutput && (
+      {chartData && (
+        <ChartRenderer
+          chartId={`tc-${chartData.chartId}`}
+          title={chartData.title}
+          data={chartData.data}
+          layout={chartData.layout}
+        />
+      )}
+
+      {hasOutput && !chartData && (
         <div className="w-full overflow-hidden" style={{ maxWidth: '100%' }}>
           <Text type="secondary" className="mb-1 block text-xs">
             {localize('com_ui_result')}

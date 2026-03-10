@@ -142,11 +142,9 @@ RUN test -d "/app/client/dist" || (echo "ERROR: client/dist not found. Please bu
 FROM base-min AS api-build
 # Add `uv` for extended MCP support (required for MCP functionality)
 # 注意：Python、vips 和构建工具已在 base-min 阶段安装
-# 使用官方安装脚本安装 uv（Debian 推荐方式）
-# 安装脚本会将 uv 安装到 /root/.local/bin，需要创建软链接到 /usr/local/bin
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ln -s /root/.local/bin/uv /usr/local/bin/uv && \
-    ln -s /root/.local/bin/uvx /usr/local/bin/uvx && \
+# 使用 pip 安装 uv，避免 astral.sh 安装脚本的 curl HTTP2/网络问题
+RUN pip3 install -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com \
+    --break-system-packages uv && \
     uv --version && echo "✓ uv installed successfully"
 WORKDIR /app
 # Copy package files and agents-because dist before installing dependencies
