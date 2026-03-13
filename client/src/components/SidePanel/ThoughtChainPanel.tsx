@@ -233,7 +233,7 @@ function SidePanelToolCallItem({
     };
   }, [toolCall.name]);
 
-  // BeCauseSkills 子工具名称映射
+  // BeCauseSkills / BeCauseSkills2 子工具名称映射
   const becauseSkillsCommandMap: Record<string, string> = {
     'database-schema': '获取数据库Schema',
     'intent-classification': '意图识别',
@@ -243,6 +243,7 @@ function SidePanelToolCallItem({
     'result-analysis': '归因调查',
     'chart-generation': '可视化图表生成',
     'reranker': '结果重排序',
+    'fluctuation-attribution': '波动归因分析',
   };
 
   // 解析工具参数，提取 command
@@ -257,9 +258,11 @@ function SidePanelToolCallItem({
     return toolCall.args;
   }, [toolCall.args]);
 
-  // 获取子工具名称（如果是 because_skills）
+  const isBeCauseSkills = function_name === 'because_skills' || function_name === 'because_skills_2';
+
+  // 获取子工具名称（如果是 because_skills / because_skills_2）
   const subToolName = useMemo(() => {
-    if (function_name === 'because_skills') {
+    if (isBeCauseSkills) {
       // 方法1: 从解析后的参数中获取（优先）
       if (parsedArgs && typeof parsedArgs === 'object' && parsedArgs !== null) {
         if ('command' in parsedArgs) {
@@ -322,7 +325,7 @@ function SidePanelToolCallItem({
       }
     }
     return null;
-  }, [function_name, parsedArgs, toolCall.args]);
+  }, [isBeCauseSkills, parsedArgs, toolCall.args]);
 
   // 格式化参数
   const args = useMemo(() => {
@@ -366,12 +369,11 @@ function SidePanelToolCallItem({
 
   // 获取标题文本
   const getTitle = () => {
-    // 如果是 because_skills，优先使用子工具名称
-    // 即使在运行时（isLoading），也要尝试提取工具名称
+    // 如果是 because_skills/because_skills_2，优先使用子工具名称
     let displayName = subToolName;
     
-    // 如果 subToolName 为空，且是 because_skills，尝试实时提取
-    if (!displayName && function_name === 'because_skills') {
+    // 如果 subToolName 为空，且是 because_skills/because_skills_2，尝试实时提取
+    if (!displayName && isBeCauseSkills) {
       // 方法1: 从解析后的对象中提取（优先）
       if (parsedArgs && typeof parsedArgs === 'object' && parsedArgs !== null) {
         if ('command' in parsedArgs) {
@@ -415,9 +417,9 @@ function SidePanelToolCallItem({
       }
     }
     
-    // 如果还是没有提取到，使用 function_name（但避免显示 because_skills）
+    // 如果还是没有提取到，使用 function_name（但避免显示原始工具 key）
     if (!displayName) {
-      displayName = function_name === 'because_skills' ? null : function_name;
+      displayName = isBeCauseSkills ? null : function_name;
     }
     
     if (isLoading) {
