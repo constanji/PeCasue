@@ -192,8 +192,10 @@ export default function EndpointsConfig({ startupConfig: propStartupConfig }: En
         throw new Error(errorData.error || '保存失败');
       }
 
-      // 清除缓存并刷新配置
+      // 清除缓存并刷新配置（含端点与模型列表，避免编辑智能体时选择提供商后不显示可用模型）
       queryClient.invalidateQueries([QueryKeys.startupConfig]);
+      queryClient.invalidateQueries([QueryKeys.endpoints]);
+      queryClient.invalidateQueries([QueryKeys.models]);
       await Promise.all([refetch(), refreshEndpoints()]);
       setShowEditor(false);
       setEditingEndpoint(undefined);
@@ -236,8 +238,10 @@ export default function EndpointsConfig({ startupConfig: propStartupConfig }: En
         status: 'success',
       });
 
-      // 清除缓存并刷新配置
+      // 清除缓存并刷新配置（含端点与模型列表）
       queryClient.invalidateQueries([QueryKeys.startupConfig]);
+      queryClient.invalidateQueries([QueryKeys.endpoints]);
+      queryClient.invalidateQueries([QueryKeys.models]);
       await refetch();
       await refreshEndpoints();
     } catch (error) {
@@ -302,8 +306,10 @@ export default function EndpointsConfig({ startupConfig: propStartupConfig }: En
         throw new Error(errorData.error || '保存失败');
       }
 
-      // 清除缓存并刷新配置
+      // 清除缓存并刷新配置（含模型列表）
       queryClient.invalidateQueries([QueryKeys.startupConfig]);
+      queryClient.invalidateQueries([QueryKeys.endpoints]);
+      queryClient.invalidateQueries([QueryKeys.models]);
       await Promise.all([refetch(), refreshEndpoints()]);
       
       setNewModelName('');
@@ -361,8 +367,10 @@ export default function EndpointsConfig({ startupConfig: propStartupConfig }: En
         throw new Error(errorData.error || '保存失败');
       }
 
-      // 清除缓存并刷新配置
+      // 清除缓存并刷新配置（含模型列表）
       queryClient.invalidateQueries([QueryKeys.startupConfig]);
+      queryClient.invalidateQueries([QueryKeys.endpoints]);
+      queryClient.invalidateQueries([QueryKeys.models]);
       await Promise.all([refetch(), refreshEndpoints()]);
       
       showToast({
