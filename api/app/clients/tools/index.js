@@ -19,6 +19,7 @@ const DatabaseSchema = require('./structured/DatabaseSchema');
 const SqlExecutor = require('./structured/SqlExecutor');
 const BeCause = require('./structured/BeCause');
 const BeCauseSkills = require('./structured/BeCauseSkills');
+const BeCauseSkills2 = require('./structured/BeCauseSkills2');
 const SemanticModelGenerator = require('./structured/SemanticModelGenerator');
 
 module.exports = {
@@ -42,5 +43,6 @@ module.exports = {
   SqlExecutor,
   BeCause,
   BeCauseSkills,
+  BeCauseSkills2,
   SemanticModelGenerator,
 };

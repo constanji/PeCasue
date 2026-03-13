@@ -165,6 +165,16 @@ def compute_f1_by_diff(exec_results, diff_json_path):
     simple_results, moderate_results, challenging_results = [], [], []
 
     for i, content in enumerate(contents):
+        if i >= num_queries:
+            failed = {"sql_idx": i, "res": 0}
+            if content["difficulty"] == "simple":
+                simple_results.append(failed)
+            elif content["difficulty"] == "moderate":
+                moderate_results.append(failed)
+            elif content["difficulty"] == "challenging":
+                challenging_results.append(failed)
+            continue
+
         if content["difficulty"] == "simple":
             simple_results.append(exec_results[i])
 

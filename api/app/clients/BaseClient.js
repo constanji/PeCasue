@@ -662,9 +662,8 @@ class BaseClient {
       this.handleTokenCountMap(tokenCountMap);
     }
 
-    // 记录即将发送给LLM的完整提示词（含系统/历史/工具/记忆）
-    logger.info('[BaseClient] 即将发送给LLM的完整提示词（含系统/历史/工具/记忆）');
-    logger.info(Array.isArray(payload) ? payload : [payload]);
+    logger.debug('[BaseClient] 即将发送给LLM的完整提示词（含系统/历史/工具/记忆）');
+    logger.debug(Array.isArray(payload) ? payload : [payload]);
 
     if (!isEdited && !this.skipSaveUserMessage) {
       userMessagePromise = this.saveMessageToDatabase(userMessage, saveOptions, user);
@@ -698,27 +697,22 @@ class BaseClient {
     // 记录开始调用完成调度
     const traceId = this.options.req?.traceId || 'unknown';
     const completionStartTime = Date.now();
-    logger.info('[BaseClient] 开始调用完成调度');
-    logger.info({
+    logger.debug('[BaseClient] 开始调用完成调度', {
       traceId,
       client: this.options.endpoint || this.options.endpointType || 'unknown',
-      endpoint: this.options.endpoint || this.options.endpointType || 'unknown',
       agentId: this.options.agent?.id || null,
       model: this.modelOptions?.model ?? this.model,
       conversationId: conversationId || null,
       payloadSize: Array.isArray(payload) ? payload.length : 1,
-      payload: Array.isArray(payload) ? payload : [payload],
     });
 
     const { completion, metadata } = await this.sendCompletion(payload, opts);
     
     // 记录完成调度结束
     const completionDurationMs = Date.now() - completionStartTime;
-    logger.info('[BaseClient] 完成调度结束');
-    logger.info({
+    logger.debug('[BaseClient] 完成调度结束', {
       traceId,
       client: this.options.endpoint || this.options.endpointType || 'unknown',
-      endpoint: this.options.endpoint || this.options.endpointType || 'unknown',
       agentId: this.options.agent?.id || null,
       model: this.modelOptions?.model ?? this.model,
       conversationId: conversationId || null,
@@ -835,12 +829,9 @@ class BaseClient {
     this.savedMessageIds.add(responseMessage.messageId);
     delete responseMessage.tokenCount;
     
-    // 记录 sendMessage completed
-    logger.info('[BaseClient] sendMessage 完成');
-    logger.info({
+    logger.debug('[BaseClient] sendMessage 完成', {
       traceId,
       client: this.options.endpoint || this.options.endpointType || 'unknown',
-      endpoint: this.options.endpoint || this.options.endpointType || 'unknown',
       agentId: this.options.agent?.id || null,
       model: this.modelOptions?.model ?? this.model,
       conversationId: conversationId || null,

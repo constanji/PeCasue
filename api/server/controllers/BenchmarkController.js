@@ -33,6 +33,7 @@ class BenchmarkController {
         model,
         toolsConfig,
         evaluationMetrics = ['EX'],
+        dataSourceId,
       } = req.body;
 
       if (!sqlDialect || !endpointName || !model) {
@@ -153,9 +154,9 @@ class BenchmarkController {
           endpointConfig: resolvedEndpointConfig,
           modelConfig,
           agentConfig,
-          toolsConfig,
+          toolsConfig: { ...toolsConfig, dataSourceId },
           evaluationMetrics,
-          userId: req.user?.id, // 传递用户ID
+          userId: req.user?.id,
         },
         results: null,
         error: null,

@@ -128,9 +128,11 @@ async function saveCustomEndpointsConfig(req, res) {
 
     await fs.writeFile(configPath, updatedYaml, 'utf8');
 
-    // Clear the startup config cache
+    // Clear caches so endpoint list and models list refresh (fix: 编辑智能体选择提供商后不显示可用模型)
     const cache = getLogStores(CacheKeys.CONFIG_STORE);
     await cache.delete(CacheKeys.STARTUP_CONFIG);
+    await cache.delete(CacheKeys.ENDPOINT_CONFIG);
+    await cache.delete(CacheKeys.MODELS_CONFIG);
 
     logger.info(`Custom endpoint "${endpoint.name}" ${existingIndex >= 0 ? 'updated' : 'added'} successfully`);
 
@@ -204,9 +206,11 @@ async function deleteCustomEndpointsConfig(req, res) {
 
     await fs.writeFile(configPath, updatedYaml, 'utf8');
 
-    // Clear the startup config cache
+    // Clear caches so endpoint list and models list refresh
     const cache = getLogStores(CacheKeys.CONFIG_STORE);
     await cache.delete(CacheKeys.STARTUP_CONFIG);
+    await cache.delete(CacheKeys.ENDPOINT_CONFIG);
+    await cache.delete(CacheKeys.MODELS_CONFIG);
 
     logger.info(`Custom endpoint "${endpointName}" deleted successfully`);
 

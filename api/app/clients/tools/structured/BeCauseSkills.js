@@ -58,8 +58,17 @@ class BeCauseSkillsTool extends Tool {
     this.userId = fields.userId || 'system';
     this.req = fields.req;
     this.projectRoot = fields.projectRoot || process.cwd();
-    this.conversation = fields.conversation; // 保存conversation信息
-    
+    this.conversation = fields.conversation;
+
+    // 基准测试模式：仅暴露允许的子命令，避免模型调用无关工具浪费时间
+    const allowed = fields.req?.body?._benchmarkAllowedCommands;
+    if (Array.isArray(allowed) && allowed.length > 0) {
+      this.schema = z.object({
+        command: z.enum(allowed),
+        arguments: z.string().optional().describe('命令参数，JSON字符串格式，包含各命令所需的参数'),
+      });
+    }
+
     // 初始化各个子工具实例
     this.tools = {
       'intent-classification': new BeCauseSkills.IntentClassificationTool({
@@ -124,9 +133,10 @@ class BeCauseSkillsTool extends Tool {
       });
       return parsed;
     } catch (error) {
+      const preview = typeof argsString === 'string' ? argsString.substring(0, 500) : String(argsString);
       logger.error('[BeCauseSkillsTool] Failed to parse arguments:', {
         error: error.message,
-        argsStringPreview: argsString.substring(0, 500) + (argsString.length > 500 ? '...' : ''),
+        argsStringPreview: preview,
       });
       return {};
     }
@@ -138,7 +148,12 @@ class BeCauseSkillsTool extends Tool {
   async _call(input) {
     const startTime = Date.now();
     try {
-      const { command, arguments: argsString } = input;
+      const { command, arguments: argsString } = input || {};
+
+      if (!command) {
+        logger.warn('[BeCauseSkillsTool] command 参数缺失');
+        return JSON.stringify({ success: false, error: 'command 参数缺失' }, null, 2);
+      }
 
       logger.info('[BeCauseSkillsTool] ========== 开始调用 ==========');
       logger.info(`[BeCauseSkillsTool] Command: ${command}, UserId: ${this.userId}`);
@@ -155,7 +170,6 @@ class BeCauseSkillsTool extends Tool {
         );
       }
 
-      // 解析参数
       const args = this.parseArguments(argsString);
 
       // 特殊处理：如果调用chart-generation且包含sql但没有data，自动先执行SQL查询

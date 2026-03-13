@@ -10,86 +10,80 @@ SELECT COUNT(T1.client_id) FROM client AS T1 INNER JOIN district AS T2 ON T1.dis
 Q:列出最年长且平均薪资最低的女性客户的账户号，并计算该最低平均薪资与最高平均薪资的差值。
 SELECT T1.account_id , ( SELECT MAX(A11) - MIN(A11) FROM district ) FROM account AS T1 INNER JOIN district AS T2 ON T1.district_id = T2.district_id INNER JOIN disp AS T3 ON T1.account_id = T3.account_id INNER JOIN client AS T4 ON T3.client_id = T4.client_id WHERE T2.district_id = ( SELECT district_id FROM client WHERE gender = 'F' ORDER BY birth_date ASC LIMIT 1 ) ORDER BY T2.A11 DESC LIMIT 1
 
-Q:列出最年轻且拥有最高平均薪资的客户的账户号。
-SELECT `T1`.`account_id` FROM `account` AS `T1` INNER JOIN `disp` AS `T2` ON `T1`.`account_id` = `T2`.`account_id` INNER JOIN `client` AS `T3` ON `T2`.`client_id` = `T3`.`client_id` INNER JOIN `district` AS `T4` ON `T4`.`district_id` = `T1`.`district_id` WHERE `T2`.`client_id` = ( SELECT `client_id` FROM `client` ORDER BY `birth_date` DESC LIMIT 1 ) GROUP BY `T4`.`A11`, `T1`.`account_id`
+Q:列出最年轻的客户的账户号。
+SELECT T2.account_id FROM disp AS T2 WHERE T2.client_id = (SELECT client_id FROM client ORDER BY birth_date DESC LIMIT 1);
 
 Q:在贷款批准日期为 1997 的账户中，列出批准金额最低且选择周度对账的账户。
-SELECT `T1`.`account_id` FROM `account` AS `T1` INNER JOIN `loan` AS `T2` ON `T1`.`account_id` = `T2`.`account_id` WHERE YEAR(`T2`.`date`) = 1997 AND `T2`.`status` = 'A' AND `T1`.`frequency` = 'POPLATEK TYDNE' AND `T2`.`amount` = ( SELECT MIN(`amount`) FROM `loan` WHERE YEAR(`date`) = 1997 AND `status` = 'A' )
+SELECT T2.account_id FROM loan AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id WHERE STRFTIME('%Y', T1.date) = '1997' AND T2.frequency = 'POPLATEK TYDNE' ORDER BY T1.amount LIMIT 1
 
 Q:在贷款期限超过 12 个月的账户中，列出开户日期为 1993 且批准金额最高的账户。
-SELECT `T1`.`account_id` FROM `account` AS `T1` INNER JOIN `loan` AS `T2` ON `T1`.`account_id` = `T2`.`account_id` WHERE `T2`.`duration` > 12 AND YEAR(`T1`.`date`) = 1993 ORDER BY `T2`.`amount` DESC LIMIT 1
+SELECT T1.account_id FROM loan AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id WHERE STRFTIME('%Y', T2.date) = '1993' AND T1.duration > 12 ORDER BY T1.amount DESC LIMIT 1
 
-Q:列出居住在 Sokolov 地区、出生日期早于 1950-01-01 的女性客户数量，这些客户必须是账户的所有者。
-SELECT COUNT(DISTINCT `T1`.`client_id`) FROM `client` AS `T1` INNER JOIN `district` AS `T2` ON `T1`.`district_id` = `T2`.`district_id` WHERE `T1`.`gender` = 'F' AND `T1`.`birth_date` < '1950-01-01' AND `T2`.`A2` = 'Sokolov' AND `T1`.`client_id` IN ( SELECT `account_id` FROM `disp` WHERE `disp`.`type` = 'OWNER' )
+Q:在已开户的客户中，出生于 1950 年之前且居住在 Sokolov 的女性有多少？
+SELECT COUNT(T2.client_id) FROM district AS T1 INNER JOIN client AS T2 ON T1.district_id = T2.district_id WHERE T2.gender = 'F' AND STRFTIME('%Y', T2.birth_date) < '1950' AND T1.A2 = 'Sokolov'
 
-Q:列出出生日期为 1976-01-29 的女性客户所属的地区名称，该客户必须是账户的所有者。
-SELECT `T4`.`A2` AS `district_name` FROM `client` AS `T1` INNER JOIN `disp` AS `T2` ON `T1`.`client_id` = `T2`.`client_id` INNER JOIN `account` AS `T3` ON `T2`.`account_id` = `T3`.`account_id` INNER JOIN `district` AS `T4` ON `T3`.`district_id` = `T4`.`district_id` WHERE `T1`.`gender` = 'F' AND `T1`.`birth_date` = '1976-01-29' AND `T2`.`type` = 'OWNER'
+Q:出生于 1976/1/29 的女性客户，其开户地区是哪里？
+SELECT T1.A2 FROM district AS T1 INNER JOIN client AS T2 ON T1.district_id = T2.district_id WHERE T2.birth_date = '1976-01-29' AND T2.gender = 'F'
 
-Q:计算南波希米亚地区居民数量最多的分支机构中，男性客户所占的百分比。
-SELECT ROUND(SUM(CASE WHEN `T1`.`gender` = 'M' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS `percentage_male_clients` FROM `client` AS `T1` INNER JOIN `district` AS `T2` ON `T1`.`district_id` = `T2`.`district_id` WHERE `T2`.`district_id` IN ( SELECT `A1` FROM `district` WHERE `A3` = 'south Bohemia' ORDER BY `A4` DESC LIMIT 1 )
+Q:在南波希米亚中居民数量最多的分支机构，其男性客户占比是多少？
+SELECT CAST(SUM(T1.gender = 'M') AS REAL) * 100 / COUNT(T1.client_id) FROM client AS T1 INNER JOIN district AS T2 ON T1.district_id = T2.district_id WHERE T2.A3 = 'south Bohemia' GROUP BY T2.A4 ORDER BY T2.A4 DESC LIMIT 1
 
-Q:计算贷款批准日期为 1993-07-05、状态为 A 的账户，在 1993-03-22 和 1998-12-27 两个日期的余额增长率。
-SELECT ROUND(((`T2`.`balance` - `T1`.`balance`) / `T1`.`balance`) * 100, 2) AS `increase_rate` FROM `loan` AS `L` INNER JOIN `disp` AS `D` ON `L`.`account_id` = `D`.`account_id` AND `D`.`type` = 'OWNER' INNER JOIN `client` AS `C` ON `D`.`client_id` = `C`.`client_id` INNER JOIN `account` AS `A` ON `L`.`account_id` = `A`.`account_id` INNER JOIN `trans` AS `T1` ON `A`.`account_id` = `T1`.`account_id` AND DATE(`T1`.`date`) = '1993-03-22' INNER JOIN `trans` AS `T2` ON `A`.`account_id` = `T2`.`account_id` AND DATE(`T2`.`date`) = '1998-12-27' WHERE `L`.`status` = 'A' AND DATE(`L`.`date`) = '1993-07-05' ORDER BY `L`.`date` ASC LIMIT 1
+Q:首次在 1993/7/5 获批贷款的客户，其账户余额从 1993/3/22 到 1998/12/27 的增长率是多少？
+SELECT CAST((SUM(IIF(T3.date = '1998-12-27', T3.balance, 0)) - SUM(IIF(T3.date = '1993-03-22', T3.balance, 0))) AS REAL) * 100 / SUM(IIF(T3.date = '1993-03-22', T3.balance, 0)) FROM loan AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id INNER JOIN trans AS T3 ON T3.account_id = T2.account_id WHERE T1.date = '1993-07-05'
 
-Q:计算所有贷款中，状态为 A 的贷款金额占总贷款金额的百分比。
-SELECT (SUM(CASE WHEN `status` = 'A' THEN `amount` ELSE 0 END) / SUM(`amount`)) * 100 AS `percentage_paid_no_issue` FROM `loan`
+Q:无问题完成还款的贷款金额占比是多少？
+SELECT (CAST(SUM(CASE WHEN status = 'A' THEN amount ELSE 0 END) AS REAL) * 100) / SUM(amount) FROM loan
 
-Q:计算金额小于 100000 的贷款中，账户状态为 C 的贷款所占的百分比。
-SELECT (SUM(CASE WHEN `T1`.`amount` < 100000 AND `T2`.`status` = 'C' THEN 1 ELSE 0 END) / COUNT(*)) * 100 AS `percentage` FROM `loan` AS `T1` INNER JOIN `account` AS `T2` ON `T1`.`account_id` = `T2`.`account_id` WHERE `T1`.`amount` < 100000
+Q:贷款金额低于 100,000 美元的情况下，仍在运行且无问题的账户占比是多少？
+SELECT CAST(SUM(status = 'C') AS REAL) * 100 / COUNT(account_id) FROM loan WHERE amount < 100000
 
-Q:列出贷款状态为 D 的账户所在地区的失业率增长率。
-SELECT `T2`.`A3` AS `district`, `T2`.`A2` AS `state`, ((`T2`.`A13` - `T2`.`A12`) / `T2`.`A12`) * 100 AS `percentage_unemployment_rate_increment` FROM `loan` AS `T1` INNER JOIN `account` AS `A` ON `T1`.`account_id` = `A`.`account_id` INNER JOIN `client` AS `C` ON `A`.`client_id` = `C`.`client_id` INNER JOIN `district` AS `T2` ON `C`.`district_id` = `T2`.`A1` WHERE `T1`.`status` = 'D' AND `T2`.`A12` IS NOT NULL AND `T2`.`A13` IS NOT NULL AND `T2`.`A12` != 0
+Q:对于仍在运行且客户负债的贷款合同，给出对应地区，并说明该地区 1995 到 1996 年的失业率增幅（百分比）。
+SELECT CAST((T3.A13 - T3.A12) AS REAL) * 100 / T3.A12 FROM loan AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id INNER JOIN district AS T3 ON T2.district_id = T3.district_id WHERE T1.status = 'D'
 
-Q:列出女性账户持有者数量最多的 9 个地区名称。
-SELECT `T2`.`A2` AS `district_name`, COUNT(`T1`.`account_id`) AS `female_account_holders` FROM `district` AS `T2` INNER JOIN `account` AS `T1` ON `T2`.`A1` = `T1`.`district_id` INNER JOIN `client` AS `C` ON `T1`.`client_id` = `C`.`client_id` INNER JOIN `disp` AS `DP` ON `C`.`client_id` = `DP`.`client_id` WHERE `DP`.`type` = 'OWNER' AND `C`.`gender` = 'F' GROUP BY `T2`.`A1`, `T2`.`A2` ORDER BY `female_account_holders` DESC LIMIT 9
+Q:按女性账户持有人数量由高到低，列出前九个地区。
+SELECT T2.A2, COUNT(T1.client_id) FROM client AS T1 INNER JOIN district AS T2 ON T1.district_id = T2.district_id WHERE T1.gender = 'F' GROUP BY T2.district_id, T2.A2 ORDER BY COUNT(T1.client_id) DESC LIMIT 9
 
-Q:计算在 1995-01-01 到 1997-12-31 期间，金额大于等于 250000 的贷款数量，这些贷款的状态为 A 或 C，账户的对账频率为月度，且客户必须是账户的所有者。
-SELECT COUNT(DISTINCT `T1`.`loan_id`) FROM `loan` AS `T1` INNER JOIN `account` AS `T2` ON `T1`.`account_id` = `T2`.`account_id` INNER JOIN `disp` AS `T3` ON `T2`.`account_id` = `T3`.`account_id` WHERE `T3`.`type` = 'OWNER' AND `T2`.`frequency` = 'POPLATEK MESICNE' AND `T1`.`amount` >= 250000 AND `T1`.`date` BETWEEN '1995-01-01' AND '1997-12-31' AND `T1`.`status` IN ('A', 'C')
+Q:1996 年 1 月各地区的非信用卡取款排名前十的是哪些地区？
+SELECT DISTINCT T1.A2 FROM district AS T1 INNER JOIN account AS T2 ON T1.district_id = T2.district_id INNER JOIN trans AS T3 ON T2.account_id = T3.account_id WHERE T3.type = 'VYDAJ' AND T3.date LIKE '1996-01%' ORDER BY A2 ASC LIMIT 10
 
-Q:计算 location 为 1 的账户中，状态为 C 或 D 的账户数量。
-SELECT COUNT(DISTINCT `T1`.`account_id`) FROM `accounts` AS `T1` INNER JOIN `contracts` AS `T2` ON `T1`.`account_id` = `T2`.`account_id` INNER JOIN `branches` AS `T3` ON `T1`.`branch_id` = `T3`.`branch_id` WHERE `T3`.`location` = 1 AND `T2`.`status` IN ('C', 'D')
+Q:在 1995/1/1 至 1997/12/31 期间，选择月度对账且批准金额至少 250,000 的贷款有多少？
+SELECT COUNT(T1.account_id) FROM account AS T1 INNER JOIN loan AS T2 ON T1.account_id = T2.account_id WHERE T2.date BETWEEN '1995-01-01' AND '1997-12-31' AND T1.frequency = 'POPLATEK MESICNE' AND T2.amount >= 250000
 
-Q:计算 a15 值第二高的分支机构中，男性客户的数量。
-SELECT COUNT(*) FROM `client` WHERE `branch_id` = ( SELECT `branch_id` FROM `branch` WHERE `a15` = ( SELECT MAX(`a15`) FROM `branch` WHERE `a15` < ( SELECT MAX(`a15`) FROM `branch` ) ) ) AND `gender` = 'M'
+Q:分支 1 中有多少账户的贷款合同正在运行？
+SELECT COUNT(T1.account_id) FROM account AS T1 INNER JOIN district AS T2 ON T1.district_id = T2.district_id INNER JOIN loan AS T3 ON T1.account_id = T3.account_id WHERE T1.district_id = 1 AND (T3.status = 'C' OR T3.status = 'D')
 
-Q:列出 1996 年 1 月交易类型为 VYDAJ 的交易中，总取款金额最高的 10 个地区名称。
-SELECT `T2`.`A2` AS `district_name`, SUM(`T1`.`amount`) AS `total_withdrawal` FROM `trans` AS `T1` INNER JOIN `account` AS `A` ON `T1`.`account_id` = `A`.`account_id` INNER JOIN `district` AS `T2` ON `A`.`district_id` = `T2`.`district_id` WHERE `T1`.`type` = 'VYDAJ' AND `T1`.`date` LIKE '1996-01%' GROUP BY `T2`.`A2` ORDER BY `total_withdrawal` DESC LIMIT 10
+Q:在 1995 年犯罪数量第二高的分支机构中，有多少男性客户？
+SELECT COUNT(T1.client_id) FROM client AS T1 INNER JOIN district AS T2 ON T1.district_id = T2.district_id WHERE T1.gender = 'M' AND T2.A15 = (SELECT T3.A15 FROM district AS T3 ORDER BY T3.A15 DESC LIMIT 1, 1)
 
-Q:计算 location_id 为 1 的账户中，状态为 C 或 D 的账户数量。
-SELECT COUNT(DISTINCT `T1`.`account_id`) FROM `accounts` AS `T1` INNER JOIN `contracts` AS `T2` ON `T1`.`account_id` = `T2`.`account_id` INNER JOIN `branches` AS `T3` ON `T1`.`branch_id` = `T3`.`branch_id` WHERE `T3`.`location_id` = 1 AND `T2`.`status` IN ('C', 'D')
+Q:1998 年进行信用卡取款且金额低于当年平均值的账户 ID 是哪些？
+SELECT T1.account_id FROM trans AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id WHERE STRFTIME('%Y', T1.date) = '1998' AND T1.operation = 'VYBER KARTOU' AND T1.amount < (SELECT AVG(amount) FROM trans WHERE STRFTIME('%Y', date) = '1998')
 
-Q:计算 a15 值第二高的分支机构中，男性客户的数量。
-SELECT COUNT(*) FROM `client` WHERE `branch_id` = ( SELECT `branch_id` FROM `branch` WHERE `a15` = ( SELECT MAX(`a15`) FROM `branch` WHERE `a15` < ( SELECT MAX(`a15`) FROM `branch` ) ) ) AND `gender` = 'M'
+Q:列出不具备贷款资格的账户类型，且该账户所在地区居民平均收入超过 8000 美元但不超过 9000 美元。
+SELECT T3.type FROM district AS T1 INNER JOIN account AS T2 ON T1.district_id = T2.district_id INNER JOIN disp AS T3 ON T2.account_id = T3.account_id WHERE T3.type != 'OWNER' AND T1.A11 BETWEEN 8000 AND 9000
 
-Q:列出 1998 年交易方式为 VYBER KARTOU 且交易金额小于该年度平均交易金额的账户ID。
-SELECT DISTINCT `T1`.`account_id` FROM `trans` AS `T1` WHERE `T1`.`operation` = 'VYBER KARTOU' AND YEAR(`T1`.`date`) = 1998 AND `T1`.`amount` < (SELECT AVG(`amount`) FROM `trans` WHERE `operation` = 'VYBER KARTOU' AND YEAR(`date`) = 1998)
+Q:在 1995 年犯罪数超过 4000 且该地区存在自 1997 年起开户的账户的地区中，1995 年犯罪数的平均值是多少？
+SELECT AVG(T1.A15) FROM district AS T1 INNER JOIN account AS T2 ON T1.district_id = T2.district_id WHERE STRFTIME('%Y', T2.date) >= '1997' AND T1.A15 > 4000
 
-Q:列出平均薪资在 8000 到 9000 之间（不包括 9000）的地区中，账户类型不是 OWNER 的账户类型。
-SELECT DISTINCT `T1`.`type` FROM `account` AS `T1` INNER JOIN `district` AS `T2` ON `T1`.`district_id` = `T2`.`district_id` WHERE `T2`.`A11` > 8000 AND `T2`.`A11` <= 9000 AND `T1`.`type` NOT IN ('OWNER')
+Q:列出客户 ID 为 3356 的所有现金取款交易。
+SELECT T4.trans_id FROM client AS T1 INNER JOIN disp AS T2 ON T1.client_id = T2.client_id INNER JOIN account AS T3 ON T2.account_id = T3.account_id INNER JOIN trans AS T4 ON T3.account_id = T4.account_id WHERE T1.client_id = 3356 AND T4.operation = 'VYBER'
 
-Q:计算平均薪资大于 4000 的地区中，在 1997 年及之后开户的地区平均犯罪数量。
-SELECT AVG(`A15`) AS `average_crimes` FROM `district` WHERE `A15` > 4000 AND `A3` IN ( SELECT DISTINCT `T2`.`A3` FROM `district` AS `T2` INNER JOIN `account` AS `T1` ON `T2`.`district_id` = `T1`.`district_id` WHERE YEAR(`T1`.`date`) >= 1997 )
+Q:在平均薪资超过 10000 的地区中，开户客户中女性的占比是多少？
+SELECT CAST(SUM(T2.gender = 'F') AS REAL) * 100 / COUNT(T2.client_id) FROM district AS T1 INNER JOIN client AS T2 ON T1.district_id = T2.district_id WHERE T1.A11 > 10000
 
-Q:列出 client_id 为 3356 的客户的所有交易，交易方式为 VYBER。
-SELECT * FROM `trans` WHERE `account_id` IN ( SELECT `account_id` FROM `client` WHERE `client_id` = 3356 ) AND `operation` = 'VYBER'
+Q:对于男性客户，其所有账户贷款总金额在 1996 到 1997 年的增长率是多少？
+SELECT CAST((SUM(CASE WHEN STRFTIME('%Y', T1.date) = '1997' THEN T1.amount ELSE 0 END) - SUM(CASE WHEN STRFTIME('%Y', T1.date) = '1996' THEN T1.amount ELSE 0 END)) AS REAL) * 100 / SUM(CASE WHEN STRFTIME('%Y', T1.date) = '1996' THEN T1.amount ELSE 0 END) FROM loan AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id INNER JOIN disp AS T3 ON T3.account_id = T2.account_id INNER JOIN client AS T4 ON T4.client_id = T3.client_id WHERE T4.gender = 'M' AND T3.type = 'OWNER'
 
-Q:计算平均薪资大于 10000 的地区中，女性客户所占的百分比。
-SELECT ROUND(SUM(CASE WHEN `T1`.`gender` = 'F' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS `percentage_female_clients` FROM `client` AS `T1` INNER JOIN `district` AS `T2` ON `T1`.`district_id` = `T2`.`district_id` WHERE `T2`.`A11` > 10000
+Q:账户 3 请求出具对账单的频率是多少？总计 3539 的扣款目的是什么？
+SELECT T1.frequency, T2.k_symbol FROM account AS T1 INNER JOIN (SELECT account_id, k_symbol, SUM(amount) AS total_amount FROM `order` GROUP BY account_id, k_symbol) AS T2 ON T1.account_id = T2.account_id WHERE T1.account_id = 3 AND T2.total_amount = 3539
 
-Q:计算男性客户在 1996 年和 1997 年的贷款金额增长率。
-SELECT ROUND((SUM(CASE WHEN YEAR(`T1`.`date`) = 1997 THEN `T1`.`amount` ELSE 0 END) - SUM(CASE WHEN YEAR(`T1`.`date`) = 1996 THEN `T1`.`amount` ELSE 0 END)) / SUM(CASE WHEN YEAR(`T1`.`date`) = 1996 THEN `T1`.`amount` ELSE 0 END) * 100, 2) AS `growth_rate_percentage` FROM `loan` AS `T1` INNER JOIN `account` AS `T2` ON `T1`.`account_id` = `T2`.`account_id` INNER JOIN `client` AS `T3` ON `T2`.`client_id` = `T3`.`client_id` WHERE `T3`.`gender` = 'M' AND YEAR(`T1`.`date`) IN (1996, 1997)
+Q:请求周度对账的男性客户占比是多少？
+SELECT CAST(SUM(T1.gender = 'M') AS REAL) * 100 / COUNT(T1.client_id) FROM client AS T1 INNER JOIN district AS T3 ON T1.district_id = T3.district_id INNER JOIN account AS T2 ON T2.district_id = T3.district_id INNER JOIN disp as T4 on T1.client_id = T4.client_id AND T2.account_id = T4.account_id WHERE T2.frequency = 'POPLATEK TYDNE'
 
-Q:列出 account_id 为 3 的账户中，交易方式为 VYBER KARTOU 的交易数量，以及金额为 -3539 的交易目的。
-SELECT (SELECT COUNT(*) FROM `trans` WHERE `account_id` = 3 AND `operation` = 'VYBER KARTOU') AS `statement_request_count`, (SELECT `k_symbol` FROM `trans` WHERE `account_id` = 3 AND `amount` = -3539 LIMIT 1) AS `debit_purpose`
+Q:最年长且平均薪资最低的女性客户的账户号是什么？
+SELECT T3.account_id FROM client AS T1 INNER JOIN district AS T2 ON T1.district_id = T2.district_id INNER JOIN account AS T3 ON T2.district_id = T3.district_id INNER JOIN disp AS T4 ON T1.client_id = T4.client_id AND T4.account_id = T3.account_id  WHERE T1.gender = 'F' ORDER BY T1.birth_date ASC, T2.A11 ASC LIMIT 1
 
-Q:计算选择周度对账且为客户所有者的账户中，男性客户所占的百分比。
-SELECT (COUNT(CASE WHEN `T1`.`gender` = 'M' THEN 1 END) / COUNT(*)) * 100 AS `percentage_male_weekly` FROM `client` AS `T1` INNER JOIN `disp` AS `T2` ON `T1`.`client_id` = `T2`.`client_id` INNER JOIN `account` AS `T3` ON `T2`.`account_id` = `T3`.`account_id` WHERE `T3`.`frequency` = 'POPLATEK TYDNE' AND `T2`.`type` = 'OWNER'
+Q:对于仍在运行的贷款合同且选择每笔交易后出具对账的情况，贷款的平均金额是多少？
+SELECT AVG(T2.amount) FROM account AS T1 INNER JOIN loan AS T2 ON T1.account_id = T2.account_id WHERE T2.status IN ('C', 'D') AND T1.frequency = 'POPLATEK PO OBRATU'
 
-Q:列出最年长女性客户的账户号，该账户的平均薪资最低。
-SELECT `T1`.`account_number` FROM `account` AS `T1` INNER JOIN `client` AS `T2` ON `T1`.`client_id` = `T2`.`client_id` WHERE `T2`.`gender` = 'F' AND `T2`.`birth_date` = (SELECT MIN(`birth_date`) FROM `client` WHERE `gender` = 'F') AND `T1`.`a11` = (SELECT MIN(`a11`) FROM `account` WHERE `client_id` IN (SELECT `client_id` FROM `client` WHERE `gender` = 'F' AND `birth_date` = (SELECT MIN(`birth_date`) FROM `client` WHERE `gender` = 'F')))
-
-Q:计算状态为 C 或 D 的贷款的平均金额，这些贷款的账户对账频率为 POPLATEK PO OBRATU，客户必须是账户的所有者。
-SELECT AVG(`T1`.`amount`) FROM `loan` AS `T1` INNER JOIN `account` AS `T2` ON `T1`.`account_id` = `T2`.`account_id` INNER JOIN `disp` AS `T3` ON `T2`.`account_id` = `T3`.`account_id` INNER JOIN `client` AS `T4` ON `T3`.`client_id` = `T4`.`client_id` INNER JOIN `district` AS `T5` ON `T4`.`district_id` = `T5`.`district_id` INNER JOIN `trans` AS `T6` ON `T2`.`account_id` = `T6`.`account_id` WHERE `T1`.`status` IN ('C', 'D') AND `T6`.`operation` = 'POPLATEK PO OBRATU' AND `T3`.`type` = 'OWNER'
-
-Q:列出拥有金卡且为客户所有者的客户的 client_id 和出生日期。
-SELECT `T1`.`client_id`, `T1`.`birth_date` FROM `client` AS `T1` INNER JOIN `disp` AS `T2` ON `T1`.`client_id` = `T2`.`client_id` INNER JOIN `card` ON `T2`.`disp_id` = `card`.`disp_id` WHERE `card`.`type` = 'gold' AND `T2`.`type` = 'OWNER'
+Q:提供拥有高级别信用卡且具备贷款资格的客户的 ID 与年龄。
+SELECT T1.client_id, STRFTIME('%Y', CURRENT_TIMESTAMP) - STRFTIME('%Y', T3.birth_date) FROM disp AS T1 INNER JOIN card AS T2 ON T2.disp_id = T1.disp_id INNER JOIN client AS T3 ON T1.client_id = T3.client_id WHERE T2.type = 'gold' AND T1.type = 'OWNER'

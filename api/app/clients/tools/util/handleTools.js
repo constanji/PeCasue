@@ -42,6 +42,7 @@ const {
   SqlExecutor,
   BeCause,
   BeCauseSkills,
+  BeCauseSkills2,
   SemanticModelGenerator,
 } = require('../');
 const { primeFiles: primeCodeFiles } = require('~/server/services/Files/Code/process');
@@ -191,6 +192,7 @@ const loadTools = async ({
     speckit: Speckit,
     because: BeCause,
     because_skills: BeCauseSkills, // BeCause问数工具 - 统一的智能问数能力集
+    because_skills_2: BeCauseSkills2, // BeCause问数工具2.0 - 波动归因增强版
     database_schema: DatabaseSchema,
     social: SocialMedia,
     bazi_astrology: BaziAstrology,
@@ -275,6 +277,12 @@ const loadTools = async ({
       req: options.req,
       projectRoot: paths.root,
       conversation: options.conversation, // 传递conversation信息，用于获取project_id
+    },
+    because_skills_2: {
+      userId: user,
+      req: options.req,
+      projectRoot: paths.root,
+      conversation: options.conversation,
     },
     database_schema: {
       apiUrl: process.env.SQL_API_URL || 'http://localhost:3001',

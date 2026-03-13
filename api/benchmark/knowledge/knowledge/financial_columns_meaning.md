@@ -430,3 +430,132 @@ SELECT * FROM district ORDER BY A4 DESC LIMIT 1  -- 居民最多的分支机构
 4. **业务规则**：某些字段有特定的业务含义（如 disp.type = 'OWNER' 才能贷款）
 
 建议在构建 RAG 系统或语义模型时，将这些字段含义作为知识库，帮助模型理解数据库结构和业务语义。
+
+---
+
+## 十二、Join Graph（表关联路径图）
+
+```
+district ─── client        （client.district_id = district.district_id）
+district ─── account       （account.district_id = district.district_id）
+client ───── disp ───── account  （disp 是 client↔account 的桥表）
+account ──── loan          （loan.account_id = account.account_id）
+account ──── trans         （trans.account_id = account.account_id）
+account ──── order         （order.account_id = account.account_id）
+disp ─────── card          （card.disp_id = disp.disp_id）
+```
+
+### Join Rules（最短路径规则）
+
+| 需要的数据 | 最短 JOIN 路径 | 说明 |
+|-----------|---------------|------|
+| client + district 属性 | `client JOIN district ON client.district_id = district.district_id` | **不要** 经过 disp 和 account |
+| account + district 属性 | `account JOIN district ON account.district_id = district.district_id` | 直接关联 |
+| client + account 属性 | `client JOIN disp ON ... JOIN account ON ...` | **必须经过 disp 桥表** |
+| account + loan 属性 | `account JOIN loan ON account.account_id = loan.account_id` | 直接关联 |
+| account + trans 属性 | `account JOIN trans ON account.account_id = trans.account_id` | 直接关联 |
+| account + order 属性 | `account JOIN [order] ON account.account_id = order.account_id` | 直接关联 |
+| client + card 属性 | `client JOIN disp ON ... JOIN card ON disp.disp_id = card.disp_id` | 经过 disp |
+
+### ⚠️ 常见错误：过度 JOIN
+
+- 如果问题只涉及 **client 和 district** 的属性（如性别、出生日期、地区名称），
+  **不要** JOIN account 或 disp 表。最短路径是 `client → district`。
+- 如果问题只涉及 **account 和 district** 的属性，
+  **不要** JOIN client 或 disp 表。最短路径是 `account → district`。
+- 只有当问题同时涉及 **client 和 account** 的属性时，才需要经过 disp。
+
+---
+
+## 十三、枚举值语义映射（自然语言 → 数据库实际值）
+
+数据库中的枚举值使用捷克语，查询时必须使用数据库中的实际值，不能使用英文翻译。
+
+### trans.operation（交易方式）
+| 自然语言 | 数据库实际值 |
+|---------|-----------|
+| credit card withdrawal（信用卡取款） | `'VYBER KARTOU'` |
+| cash withdrawal（现金取款） | `'VYBER'` |
+| cash deposit / credit in cash（现金存款） | `'VKLAD'` |
+| collection from another bank（从其他银行收款） | `'PREVOD Z UCTU'` |
+| remittance to another bank（转账到其他银行） | `'PREVOD NA UCET'` |
+
+### trans.type（交易类型）
+| 自然语言 | 数据库实际值 |
+|---------|-----------|
+| credit / deposit（存入） | `'PRIJEM'` |
+| withdrawal（支出） | `'VYDAJ'` |
+
+### trans.k_symbol / order.k_symbol（交易/支付目的）
+| 自然语言 | 数据库实际值 |
+|---------|-----------|
+| insurance payment（保险支付） | `'POJISTNE'` |
+| household payment（家庭支付） | `'SIPO'` |
+| leasing（租赁） | `'LEASING'` |
+| loan payment（贷款支付） | `'UVER'` |
+| interest credited（利息收入） | `'UROK'` |
+| sanction interest / negative balance penalty（罚息） | `'SANKC. UROK'` |
+| payment for statement（对账单费用） | `'SLUZBY'` |
+| old-age pension（养老金） | `'DUCHOD'` |
+
+### account.frequency（对账单频率）
+| 自然语言 | 数据库实际值 |
+|---------|-----------|
+| monthly issuance（月度发放） | `'POPLATEK MESICNE'` |
+| weekly issuance（周度发放） | `'POPLATEK TYDNE'` |
+| issuance after transaction（交易后发放） | `'POPLATEK PO OBRATU'` |
+
+### loan.status（贷款状态）
+| 自然语言 | 数据库实际值 |
+|---------|-----------|
+| finished, no problems（已还清） | `'A'` |
+| finished, unpaid（已结束未还清） | `'B'` |
+| running, OK（进行中正常） | `'C'` |
+| running, in debt（进行中违约） | `'D'` |
+
+### disp.type（分配类型）
+| 自然语言 | 数据库实际值 |
+|---------|-----------|
+| owner（所有者） | `'OWNER'` |
+| user（使用者） | `'USER'` |
+| authorized person / disponent（授权人） | `'DISPONENT'` |
+
+### card.type（信用卡类型）
+| 自然语言 | 数据库实际值 |
+|---------|-----------|
+| junior card | `'junior'` |
+| classic card | `'classic'` |
+| gold card | `'gold'` |
+
+### client.gender（性别）
+| 自然语言 | 数据库实际值 |
+|---------|-----------|
+| female（女性） | `'F'` |
+| male（男性） | `'M'` |
+
+---
+
+## 十四、SQL 生成规则
+
+### 规则 1：只返回问题明确要求的字段
+- 不要返回额外的列。如果问题只问 "account_id"，不要附带返回 amount、frequency 等。
+- 如果问题问 "how many"，返回 COUNT(...)，不要返回明细行。
+
+### 规则 2：使用最短 JOIN 路径
+- 参考上方的 Join Rules 表，选择涉及最少表的路径。
+- 如果问题只涉及 client 和 district，**不要** JOIN disp 和 account。
+
+### 规则 3：优先使用简洁写法
+- 找最大/最小值：优先 `ORDER BY ... LIMIT 1` 而非子查询或 CTE。
+- 年份对比：优先 `SUM(CASE WHEN ... THEN ... END)` 而非多个 CTE。
+- 避免不必要的 CTE，除非查询确实需要多步骤聚合。
+
+### 规则 4：使用数据库中的实际枚举值
+- 查询条件中必须使用捷克语原始值（如 `'VYBER KARTOU'`），不能使用英文翻译（如 `'credit card withdrawal'`）。
+- 参考上方的枚举值语义映射表。
+
+### 规则 5：order 表 vs trans 表
+- `order` 表存储的是**定期/计划性转账指令**（如每月固定扣款）。
+- `trans` 表存储的是**实际交易流水**（每笔实际发生的交易）。
+- 当问题提到 "permanent order" 或 "standing order" 时，查 `order` 表。
+- 当问题提到 "transaction" 时，查 `trans` 表。

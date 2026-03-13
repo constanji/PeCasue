@@ -203,6 +203,13 @@
     "authConfig": []
   },
   {
+    "name": "BeCause问数2.0",
+    "pluginKey": "because_skills_2",
+    "description": "BeCause问数工具2.0 - 智能问数增强版，新增波动归因能力。Commands: intent-classification (意图分类), rag-retrieval (RAG知识检索), database-schema (数据库Schema获取), reranker (结果重排序), sql-validation (SQL校验，支持7类关键字分类+双盲对比), result-analysis (结果分析，支持Adtributor归因+异常检测+趋势分析), sql-executor (SQL执行), chart-generation (图表生成), fluctuation-attribution (波动归因，维度归因+指标归因+时间对比+下钻)。核心算法：JS散度、解释力、惊喜度、简洁性、ElasticNet回归、SHAP特征重要性。",
+    "icon": "📈",
+    "authConfig": []
+  },
+  {
     "name": "SQL Executor",
     "pluginKey": "sql_executor",
     "description": "执行只读的 SQL SELECT 查询并返回结果和归因分析。调用内部 hsp-sql-api 服务的 /sql_query 接口执行查询，返回数据行、行数统计以及结构化的归因说明，帮助智能体在回答时清晰说明结论来自哪张表、哪些字段、哪些过滤条件。",
