@@ -142,7 +142,7 @@ class RAGRetrievalTool extends Tool {
       } = options;
 
       logger.info('[RAGRetrievalTool] 调用RAGService.query:', {
-        query: query.substring(0, 30),
+        query: (query || '').substring(0, 30),
         userId,
         types: types || ['semantic_model', 'qa_pair', 'synonym', 'business_knowledge'],
         topK,
@@ -264,7 +264,18 @@ class RAGRetrievalTool extends Tool {
       enhanced_reranking = false,
       entity_id,
       file_ids,
-    } = input;
+    } = input || {};
+
+    if (!query || typeof query !== 'string') {
+      logger.warn('[RAGRetrievalTool] query 参数缺失或无效:', { query });
+      return JSON.stringify({
+        query: query || '',
+        results: [],
+        total: 0,
+        error: 'query 参数缺失',
+        metadata: { retrieval_count: 0, reranked: false, enhanced_reranking: false },
+      }, null, 2);
+    }
 
     try {
       logger.info('[RAGRetrievalTool] 开始RAG检索:', {
