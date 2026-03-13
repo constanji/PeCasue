@@ -37,6 +37,18 @@ export default function ToolCall({
   const [isAnimating, setIsAnimating] = useState(false);
   const prevShowInfoRef = useRef<boolean>(showInfo);
 
+  const becauseSkillsCommandMap: Record<string, string> = {
+    'database-schema': '获取数据库Schema',
+    'intent-classification': '意图识别',
+    'rag-retrieval': 'RAG检索',
+    'sql-validation': 'SQL语句验证',
+    'sql-executor': 'SQL执行',
+    'result-analysis': '归因调查',
+    'chart-generation': '可视化图表生成',
+    'reranker': '结果重排序',
+    'fluctuation-attribution': '波动归因分析',
+  };
+
   const { function_name, domain, isMCPToolCall } = useMemo(() => {
     if (typeof name !== 'string') {
       return { function_name: '', domain: null, isMCPToolCall: false };
@@ -58,6 +70,38 @@ export default function ToolCall({
       isMCPToolCall: false,
     };
   }, [name]);
+
+  const displayName = useMemo(() => {
+    if (function_name !== 'because_skills' && function_name !== 'because_skills_2') {
+      return function_name;
+    }
+    const extractCommand = (source: string | Record<string, unknown>) => {
+      if (typeof source === 'object' && source !== null && 'command' in source) {
+        const cmd = source.command;
+        if (typeof cmd === 'string' && cmd.length > 0) {
+          return becauseSkillsCommandMap[cmd] || cmd;
+        }
+      }
+      if (typeof source === 'string' && source.length > 0) {
+        try {
+          const parsed = JSON.parse(source);
+          if (parsed?.command) {
+            return becauseSkillsCommandMap[parsed.command] || parsed.command;
+          }
+        } catch { /* noop */ }
+        const m = source.match(/"command"\s*:\s*"([^"]+)"/);
+        if (m?.[1]) {
+          return becauseSkillsCommandMap[m[1]] || m[1];
+        }
+        const partial = source.match(/"command"\s*:\s*"([^"]*)/);
+        if (partial?.[1] && partial[1].length >= 3) {
+          return becauseSkillsCommandMap[partial[1]] || partial[1];
+        }
+      }
+      return null;
+    };
+    return extractCommand(_args) || function_name;
+  }, [function_name, _args]);
 
   const error =
     typeof output === 'string' && output.toLowerCase().includes('error processing tool');
@@ -131,12 +175,12 @@ export default function ToolCall({
       return localize('com_ui_cancelled');
     }
     if (isMCPToolCall === true) {
-      return localize('com_assistants_completed_function', { 0: function_name });
+      return localize('com_assistants_completed_function', { 0: displayName });
     }
     if (domain != null && domain && domain.length !== Constants.ENCODED_DOMAIN_LENGTH) {
       return localize('com_assistants_completed_action', { 0: domain });
     }
-    return localize('com_assistants_completed_function', { 0: function_name });
+    return localize('com_assistants_completed_function', { 0: displayName });
   };
 
   useLayoutEffect(() => {
@@ -199,8 +243,8 @@ export default function ToolCall({
           progress={progress}
           onClick={() => setShowInfo((prev) => !prev)}
           inProgressText={
-            function_name
-              ? localize('com_assistants_running_var', { 0: function_name })
+            displayName
+              ? localize('com_assistants_running_var', { 0: displayName })
               : localize('com_assistants_running_action')
           }
           authText={
