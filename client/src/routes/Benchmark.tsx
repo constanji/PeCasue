@@ -52,6 +52,7 @@ export default function Benchmark() {
   const [selectedDatabase, setSelectedDatabase] = useState<string>('');
   const [selectedEndpoint, setSelectedEndpoint] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedDataSourceId, setSelectedDataSourceId] = useState<string>('');
   const [useKnowledge, setUseKnowledge] = useState<boolean>(false);
   const [qaType, setQAType] = useState<'desc' | 'sql' | 'full' | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -60,6 +61,7 @@ export default function Benchmark() {
     Array<{ time: string; message: string; type: 'info' | 'success' | 'warning' | 'error' }>
   >([]);
   const [evaluationMetrics, setEvaluationMetrics] = useState(defaultEvaluationMetrics);
+  const [dataSources, setDataSources] = useState<Array<{ _id: string; name: string }>>([]);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   const { data: endpointsConfig } = useGetEndpointsQuery({ enabled: isAuthenticated });
@@ -85,6 +87,23 @@ export default function Benchmark() {
   }, [selectedEndpoint, modelsConfig]);
 
   useEffect(() => {
+    if (selectedEndpoint !== EModelEndpoint.agents || !isAuthenticated) {
+      setDataSources([]);
+      return;
+    }
+    fetch('/api/config/data-sources', {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      credentials: 'include',
+    })
+      .then((res) => res.json())
+      .then((resp) => {
+        const list = resp?.data ?? resp;
+        if (Array.isArray(list)) setDataSources(list);
+      })
+      .catch(() => setDataSources([]));
+  }, [selectedEndpoint, isAuthenticated, token]);
+
+  useEffect(() => {
     try {
       const raw = localStorage.getItem(BENCHMARK_CONFIG_KEY);
       if (raw) {
@@ -96,6 +115,7 @@ export default function Benchmark() {
         if (typeof saved.useKnowledge === 'boolean') setUseKnowledge(saved.useKnowledge);
         if (saved.qaType != null) setQAType(saved.qaType as 'desc' | 'sql' | 'full' | null);
         if (Array.isArray(saved.evaluationMetrics)) setEvaluationMetrics(saved.evaluationMetrics as typeof defaultEvaluationMetrics);
+        if (saved.selectedDataSourceId != null) setSelectedDataSourceId(String(saved.selectedDataSourceId));
       }
     } catch {
       // ignore invalid stored config
@@ -108,6 +128,7 @@ export default function Benchmark() {
       selectedDatabase,
       selectedEndpoint,
       selectedModel,
+      selectedDataSourceId,
       useKnowledge,
       qaType,
       evaluationMetrics,
@@ -117,7 +138,7 @@ export default function Benchmark() {
     } catch {
       // ignore quota or parse errors
     }
-  }, [selectedDatabaseType, selectedDatabase, selectedEndpoint, selectedModel, useKnowledge, qaType, evaluationMetrics]);
+  }, [selectedDatabaseType, selectedDatabase, selectedEndpoint, selectedModel, selectedDataSourceId, useKnowledge, qaType, evaluationMetrics]);
 
   const databaseTypes = [
     { id: 'SQLite', name: 'SQLite' },
@@ -174,6 +195,7 @@ export default function Benchmark() {
           model: selectedModel,
           toolsConfig: { useKnowledge, qaType },
           evaluationMetrics: evaluationMetrics.filter((m) => m.checked).map((m) => m.id),
+          dataSourceId: selectedDataSourceId || undefined,
         }),
       });
       const data = await response.json();
@@ -346,6 +368,33 @@ export default function Benchmark() {
                       <div className="mt-2 text-xs text-text-tertiary">暂无可用智能体（请先在 Agent平台创建，并确保你有权限访问）</div>
                     ) : null}
                   </div>
+                  {selectedEndpoint === EModelEndpoint.agents && (
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-text-primary">
+                        数据源
+                        <span className="ml-1 text-xs font-normal text-text-tertiary">(Agent 工具将连接此数据源执行查询)</span>
+                      </label>
+                      {dataSources.length > 0 ? (
+                        <select
+                          aria-label="选择数据源"
+                          value={selectedDataSourceId}
+                          onChange={(e) => setSelectedDataSourceId(e.target.value)}
+                          className="w-full rounded-md border border-border-light bg-surface-primary px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none"
+                        >
+                          <option value="">-- 不指定（使用 Agent 默认配置） --</option>
+                          {dataSources.map((ds: any) => (
+                            <option key={ds._id} value={ds._id}>
+                              {ds.name}{ds.type ? ` (${ds.type})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="rounded-md border border-border-light bg-surface-tertiary px-3 py-2 text-sm text-text-secondary">
+                          暂无数据源，请先在管理后台配置数据源
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
