@@ -108,8 +108,8 @@
     "passport-jwt": "^4.0.1",
     "passport-ldapauth": "^3.0.1",
     "passport-local": "^1.0.0",
-    "pg": "^8.16.3",
     "pdf-parse": "^1.1.1",
+    "pg": "^8.16.3",
     "plotly.js-dist-min": "^2.35.3",
     "rate-limit-redis": "^4.2.0",
     "sharp": "^0.33.5",
@@ -120,6 +120,7 @@
     "winston": "^3.11.0",
     "winston-daily-rotate-file": "^5.0.0",
     "word-extractor": "^1.0.4",
+    "xlsx": "^0.18.5",
     "youtube-transcript": "^1.2.1",
     "zod": "^3.22.4"
   },

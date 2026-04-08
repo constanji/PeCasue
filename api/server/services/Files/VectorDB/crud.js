@@ -354,6 +354,17 @@ async function uploadVectorsLocal({ req, file, file_id, entity_id, storageMetada
                    file.mimetype === 'application/msword' ||
                    fixedFilename?.toLowerCase().endsWith('.docx') ||
                    fixedFilename?.toLowerCase().endsWith('.doc');
+    const isExcel = file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+                    file.mimetype === 'application/vnd.ms-excel' ||
+                    file.mimetype === 'application/msexcel' ||
+                    file.mimetype === 'application/x-msexcel' ||
+                    file.mimetype === 'application/x-ms-excel' ||
+                    file.mimetype === 'application/x-excel' ||
+                    file.mimetype === 'application/x-dos_ms_excel' ||
+                    file.mimetype === 'application/xls' ||
+                    file.mimetype === 'application/x-xls' ||
+                    fixedFilename?.toLowerCase().endsWith('.xlsx') ||
+                    fixedFilename?.toLowerCase().endsWith('.xls');
     
     if (isPDF) {
       // 使用PDFParseService解析PDF
@@ -425,6 +436,40 @@ async function uploadVectorsLocal({ req, file, file_id, entity_id, storageMetada
         }
         chunks = splitTextIntoChunks(text, CHUNK_SIZE, CHUNK_OVERLAP);
         // 为普通文本文件创建默认metadata
+        chunkMetadataList = chunks.map((_, idx) => ({
+          chunk_index: idx,
+          source: 'text',
+        }));
+        logger.info(`[uploadVectorsLocal] 文件已分块: ${chunks.length} 个块`);
+      }
+    } else if (isExcel) {
+      try {
+        const ExcelParseService = require('../../RAG/ExcelParseService');
+        const excelService = new ExcelParseService();
+        await excelService.initialize();
+        
+        logger.info(`[uploadVectorsLocal] 使用ExcelParseService解析Excel文件`);
+        const excelChunks = await excelService.parseExcelDocument(file.path, {
+          chunkSize: CHUNK_SIZE,
+          chunkOverlap: CHUNK_OVERLAP,
+          fileMetadata: {
+            file_id: file_id,
+            filename: fixedFilename,
+            mimetype: file.mimetype,
+          },
+        });
+        
+        chunks = excelChunks.map(chunk => chunk.text);
+        chunkMetadataList = excelChunks.map(chunk => chunk.metadata);
+        
+        logger.info(`[uploadVectorsLocal] Excel解析成功: ${excelChunks.length} 个块`);
+      } catch (excelError) {
+        logger.warn(`[uploadVectorsLocal] Excel解析失败，回退到普通文本解析: ${excelError.message}`);
+        const { text, bytes } = await parseText({ req, file, file_id: file_id });
+        if (!text || text.trim().length === 0) {
+          throw new Error('文件解析后没有文本内容');
+        }
+        chunks = splitTextIntoChunks(text, CHUNK_SIZE, CHUNK_OVERLAP);
         chunkMetadataList = chunks.map((_, idx) => ({
           chunk_index: idx,
           source: 'text',

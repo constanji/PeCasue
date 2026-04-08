@@ -90,14 +90,16 @@ const AttachFileMenu = ({
       return;
     }
     inputRef.current.value = '';
+    const docTypes =
+      '.pdf,.doc,.docx,.xls,.xlsx,.csv,.md,.txt,.json,.xml,.yaml,.yml,.html,.pptx';
     if (fileType === 'image') {
       inputRef.current.accept = 'image/*';
     } else if (fileType === 'document') {
-      inputRef.current.accept = '.pdf,application/pdf';
+      inputRef.current.accept = `${docTypes},application/pdf`;
     } else if (fileType === 'multimodal') {
-      inputRef.current.accept = 'image/*,.pdf,application/pdf';
+      inputRef.current.accept = `image/*,${docTypes},application/pdf`;
     } else if (fileType === 'google_multimodal') {
-      inputRef.current.accept = 'image/*,.pdf,application/pdf,video/*,audio/*';
+      inputRef.current.accept = `image/*,${docTypes},application/pdf,video/*,audio/*`;
     } else {
       inputRef.current.accept = '';
     }

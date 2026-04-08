@@ -139,9 +139,49 @@ export async function parseTextNative(file: Express.Multer.File): Promise<{
     }
   }
 
+  // 如果是Excel文件，尝试使用Excel解析服务
+  const isExcel = file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+                  file.mimetype === 'application/vnd.ms-excel' ||
+                  file.mimetype === 'application/msexcel' ||
+                  file.mimetype === 'application/x-msexcel' ||
+                  file.mimetype === 'application/x-ms-excel' ||
+                  file.mimetype === 'application/x-excel' ||
+                  file.mimetype === 'application/x-dos_ms_excel' ||
+                  file.mimetype === 'application/xls' ||
+                  file.mimetype === 'application/x-xls' ||
+                  file.originalname?.toLowerCase().endsWith('.xlsx') ||
+                  file.originalname?.toLowerCase().endsWith('.xls');
+
+  if (isExcel) {
+    try {
+      let ExcelParseService;
+      try {
+        ExcelParseService = require('~/server/services/RAG/ExcelParseService');
+      } catch (e) {
+        const path = require('path');
+        const serverPath = path.resolve(process.cwd(), 'api/server');
+        ExcelParseService = require(path.join(serverPath, 'services/RAG/ExcelParseService'));
+      }
+
+      const excelService = new ExcelParseService();
+      await excelService.initialize();
+
+      const parseResult = await excelService.parseExcel(file.path);
+
+      logger.info(`[parseTextNative] Excel解析成功: ${parseResult.metadata.sheet_count} 个工作表, ${parseResult.text.length} 字符`);
+
+      return {
+        text: parseResult.text,
+        bytes: Buffer.byteLength(parseResult.text, 'utf8'),
+        source: FileSources.text,
+      };
+    } catch (excelError) {
+      logger.warn('[parseTextNative] Excel解析失败:', (excelError as Error).message);
+      throw new Error(`Excel解析失败: ${(excelError as Error).message}`);
+    }
+  }
+
   // 如果是Word文件，尝试使用Word解析服务
-  // 注意：Word文件的详细解析（包括分块和metadata）主要在 uploadVectorsLocal 函数中处理
-  // 这里只做基本的文本提取，用于非向量化场景
   const isWord = file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
                  file.mimetype === 'application/msword' ||
                  file.originalname?.toLowerCase().endsWith('.docx') ||

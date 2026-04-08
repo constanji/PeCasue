@@ -1,5 +1,5 @@
 import { Providers } from '@because/agents';
-import { isOpenAILikeProvider, isDocumentSupportedProvider } from '@because/data-provider';
+import { isDocumentSupportedProvider } from '@because/data-provider';
 import type { IMongoFile } from '@because/data-schemas';
 import type {
   AnthropicDocumentBlock,
@@ -9,6 +9,17 @@ import type {
 } from '~/types';
 import { getFileStream, getConfiguredFileSizeLimit } from './utils';
 import { validatePdf } from '~/files/validation';
+
+/**
+ * Providers that truly support native `type: 'file'` content blocks
+ * in the OpenAI Chat Completions format.
+ * Most OpenAI-compatible APIs (ModelScope, DeepSeek, Ollama, OpenRouter, etc.)
+ * do NOT support this — they will reject with "unknown variant `file`".
+ */
+const nativeFileBlockProviders = new Set<string>([
+  Providers.OPENAI,
+  Providers.XAI,
+]);
 
 /**
  * Processes and encodes document files for various providers
@@ -116,7 +127,7 @@ export async function encodeAndFormatDocuments(
           mimeType: 'application/pdf',
           data: content,
         });
-      } else if (isOpenAILikeProvider(provider) && provider != Providers.AZURE) {
+      } else if (nativeFileBlockProviders.has(provider)) {
         result.documents.push({
           type: 'file',
           file: {

@@ -11,8 +11,11 @@ export function sanitizeFilename(inputName: string): string {
   // Remove any directory components
   let name = path.basename(inputName);
 
-  // Replace any non-alphanumeric characters except for '.' and '-'
-  name = name.replace(/[^a-zA-Z0-9.-]/g, '_');
+  // Remove path traversal, control chars, and filesystem-unsafe characters
+  // Keep Unicode letters/digits (Chinese, Japanese, Korean, etc.), spaces, '.', '-', '_', '(', ')'
+  name = name.replace(/[/\\:*?"<>|\x00-\x1f\x7f]/g, '_');
+  // Collapse consecutive underscores
+  name = name.replace(/_+/g, '_');
 
   // Ensure the name doesn't start with a dot (hidden file in Unix-like systems)
   if (name.startsWith('.') || name === '') {

@@ -759,6 +759,23 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
     filepath = result.filepath;
   }
 
+  // 对消息附件自动做文本提取，让 Agent 能读取文件内容
+  let extractedText;
+  let finalSource = source;
+  if (messageAttachment && !isImage && !tool_resource) {
+    try {
+      const parsed = await parseText({ req, file, file_id });
+      if (parsed.text && parsed.text.trim().length > 0) {
+        extractedText = parsed.text;
+        bytes = parsed.bytes || bytes;
+        finalSource = FileSources.text;
+        logger.info(`[processAgentFileUpload] 消息附件文本提取成功: ${file.originalname}, ${extractedText.length} 字符`);
+      }
+    } catch (extractError) {
+      logger.warn(`[processAgentFileUpload] 消息附件文本提取失败（非致命）: ${file.originalname}`, extractError.message);
+    }
+  }
+
   const fileInfo = removeNullishValues({
     user: req.user.id,
     file_id,
@@ -769,9 +786,10 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
     context: messageAttachment ? FileContext.message_attachment : FileContext.agents,
     model: messageAttachment ? undefined : req.body.model,
     metadata: fileInfoMetadata,
+    text: extractedText,
     type: file.mimetype,
     embedded,
-    source,
+    source: finalSource,
     height,
     width,
   });

@@ -1346,6 +1346,8 @@ class BaseClient {
       } else if (file.type.startsWith('audio/')) {
         categorizedAttachments.audios.push(file);
         allFiles.push(file);
+      } else {
+        allFiles.push(file);
       }
     }
 
