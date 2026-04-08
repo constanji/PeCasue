@@ -95,7 +95,7 @@ async function getS3URL({
 
   // Add response headers if specified
   if (customFilename) {
-    // 🔥 修复Content-Disposition header编码问题
+    // 修复Content-Disposition header编码问题
     const { fixFilenameEncoding } = require('~/server/utils/files');
     const fixedFilename = fixFilenameEncoding(customFilename);
     

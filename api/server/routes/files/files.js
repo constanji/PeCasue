@@ -51,7 +51,7 @@ router.get('/', async (req, res) => {
         logger.warn('[/files] Error refreshing S3 file URLs:', error);
       }
     }
-    // 🔥 显式设置 UTF-8 charset，防止前端二次错误解码
+    // 显式设置 UTF-8 charset，防止前端二次错误解码
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.status(200).send(files);
   } catch (error) {
@@ -312,9 +312,14 @@ router.get('/download/:userId/:file_id', fileAccess, async (req, res) => {
     // Access already validated by fileAccess middleware
     const file = req.fileAccess.file;
 
-    // 🔥 如果文件已向量化，直接返回数据库中的文本内容（用于查看详情）
-    // 不需要检查 query 参数或 Accept header，因为用户明确要求返回数据库内容
-    if (file.embedded) {
+    // 原生预览 / 下载原件：必须返回原始字节流，不能返回向量库合并文本（否则 PDF/Excel 解析会失败并可能导致 500）
+    const wantOriginalFile =
+      req.query.original === '1' ||
+      req.query.raw === '1' ||
+      String(req.get('X-Because-File-Original') || '') === '1';
+
+    // 如果文件已向量化，默认返回数据库中的文本内容（兼容旧「当详情下载」行为）
+    if (file.embedded && !wantOriginalFile) {
       try {
         const VectorDBService = require('~/server/services/RAG/VectorDBService');
         const vectorDBService = new VectorDBService();
@@ -344,7 +349,7 @@ router.get('/download/:userId/:file_id', fileAccess, async (req, res) => {
 
           logger.info(`[files/download] 返回向量化文件的文本内容: ${file_id}, ${chunks.length} 个chunks`);
 
-          // 🔥 显式设置 UTF-8 charset，返回纯文本
+          // 显式设置 UTF-8 charset，返回纯文本
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.status(200).send(fullText);
           return;
@@ -371,17 +376,17 @@ router.get('/download/:userId/:file_id', fileAccess, async (req, res) => {
     }
 
     const setHeaders = () => {
-      // 🔥 先修复文件名编码问题（Latin1 → UTF-8）
+      // 先修复文件名编码问题（Latin1 → UTF-8）
       const fixedFilename = fixFilenameEncoding(file.filename);
       // 然后清理文件名（移除UUID前缀等）
       const cleanedFilename = cleanFileName(fixedFilename);
       
-      // 🔥 修复Content-Disposition header编码问题
+      // 修复Content-Disposition header编码问题
       // HTTP header 中不能直接包含非ASCII字符，必须使用RFC 5987格式
       // 即使是在引号内，非ASCII字符也会导致 "Invalid character in header content" 错误
       let contentDisposition;
       
-      // 🔥 HTTP header 值中不能包含以下字符（即使是在引号内）：
+      // HTTP header 值中不能包含以下字符（即使是在引号内）：
       // - 非ASCII字符（\x80-\xFF）
       // - 控制字符（\x00-\x1F，除了 \t）
       // - 某些特殊字符：\x7F, \x22 (双引号), \x5C (反斜杠)
@@ -421,7 +426,12 @@ router.get('/download/:userId/:file_id', fileAccess, async (req, res) => {
       
       res.setHeader('Content-Disposition', contentDisposition);
       res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('X-File-Metadata', JSON.stringify(file));
+      // Node 禁止在响应头中写入非 Latin-1 字符；file 含中文文件名等时 JSON 会触发 Invalid character in header content
+      res.setHeader(
+        'X-File-Metadata',
+        Buffer.from(JSON.stringify(file), 'utf8').toString('base64'),
+      );
+      res.setHeader('X-File-Metadata-Encoding', 'base64');
     };
 
     if (checkOpenAIStorage(file.source)) {
@@ -505,7 +515,6 @@ router.get('/text/:userId/:file_id', fileAccess, async (req, res) => {
           chunks.sort((a, b) => a.index - b.index);
           const fullText = chunks.map(chunk => chunk.content).join('\n\n');
 
-          // 🔥 显式设置 UTF-8 charset
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.status(200).send(fullText);
           return;
@@ -517,6 +526,7 @@ router.get('/text/:userId/:file_id', fileAccess, async (req, res) => {
     }
 
     // 如果文件未向量化或向量数据库查询失败，尝试解析原始文件
+    let tempPathForCleanup;
     try {
       const { parseText } = require('@because/api');
       const { getStrategyFunctions } = require('~/server/services/Files/strategies');
@@ -531,17 +541,12 @@ router.get('/text/:userId/:file_id', fileAccess, async (req, res) => {
       const fs = require('fs');
       const path = require('path');
       const os = require('os');
-      
-      // 将流保存到临时文件
+      const { pipeline } = require('stream/promises');
+
+      // 将流完整写入临时文件（须等写入结束，否则解析可能读到空/截断文件）
       const tempPath = path.join(os.tmpdir(), `file_${file_id}_${Date.now()}`);
-      const writeStream = fs.createWriteStream(tempPath);
-      
-      await new Promise((resolve, reject) => {
-        fileStream.pipe(writeStream);
-        fileStream.on('end', resolve);
-        fileStream.on('error', reject);
-        writeStream.on('error', reject);
-      });
+      tempPathForCleanup = tempPath;
+      await pipeline(fileStream, fs.createWriteStream(tempPath));
 
       // 解析文件为文本
       const mockFile = {
@@ -556,14 +561,22 @@ router.get('/text/:userId/:file_id', fileAccess, async (req, res) => {
       // 清理临时文件
       try {
         fs.unlinkSync(tempPath);
+        tempPathForCleanup = undefined;
       } catch (e) {
         logger.warn(`[files/text] Failed to delete temp file: ${tempPath}`, e.message);
       }
 
-      // 🔥 显式设置 UTF-8 charset
+      // 显式设置 UTF-8 charset
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.status(200).send(text);
     } catch (parseError) {
+      if (tempPathForCleanup) {
+        try {
+          require('fs').unlinkSync(tempPathForCleanup);
+        } catch (_) {
+          /* ignore */
+        }
+      }
       logger.error(`[files/text] Failed to parse file ${file_id}:`, parseError);
       res.status(500).json({ 
         error: '无法解析文件内容',

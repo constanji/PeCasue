@@ -1,13 +1,16 @@
-import { memo, useState, useEffect } from 'react';
+import { memo, useState, useEffect, type MouseEvent } from 'react';
 import { imageExtRegex, Tools } from '@because/data-provider';
 import type { TAttachment, TFile, TAttachmentMetadata } from '@because/data-provider';
 import FileContainer from '~/components/Chat/Input/Files/FileContainer';
 import Image from '~/components/Chat/Messages/Content/Image';
 import { useAttachmentLink } from './LogLink';
+import FileTextPreviewDialog from './FileTextPreviewDialog';
 import { cn } from '~/utils';
 
 const FileAttachment = memo(({ attachment }: { attachment: Partial<TAttachment> }) => {
   const [isVisible, setIsVisible] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const fileId = (attachment as TFile).file_id;
   const { handleDownload } = useAttachmentLink({
     href: attachment.filepath ?? '',
     filename: attachment.filename ?? '',
@@ -22,6 +25,16 @@ const FileAttachment = memo(({ attachment }: { attachment: Partial<TAttachment> 
   if (!attachment.filepath) {
     return null;
   }
+
+  const handleCardClick = (e: MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    if (fileId) {
+      setPreviewOpen(true);
+    } else {
+      void handleDownload(e);
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -37,10 +50,15 @@ const FileAttachment = memo(({ attachment }: { attachment: Partial<TAttachment> 
     >
       <FileContainer
         file={attachment}
-        onClick={handleDownload}
+        onClick={handleCardClick}
         overrideType={extension}
         containerClassName="max-w-fit"
         buttonClassName="bg-surface-secondary hover:cursor-pointer hover:bg-surface-hover active:bg-surface-secondary focus:bg-surface-hover hover:border-border-heavy active:border-border-heavy"
+      />
+      <FileTextPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        attachment={attachment}
       />
     </div>
   );

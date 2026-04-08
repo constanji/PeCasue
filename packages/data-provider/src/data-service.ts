@@ -683,13 +683,32 @@ export const uploadAgentAvatar = (data: m.AgentAvatarVariables): Promise<a.Agent
   );
 };
 
-export const getFileDownload = async (userId: string, file_id: string): Promise<AxiosResponse> => {
-  return request.getResponse(`${endpoints.files()}/download/${userId}/${file_id}`, {
+export const getFileDownload = async (
+  userId: string,
+  file_id: string,
+  options?: { original?: boolean },
+): Promise<AxiosResponse> => {
+  const q = options?.original === true ? '?original=1' : '';
+  return request.getResponse(`${endpoints.files()}/download/${userId}/${file_id}${q}`, {
     responseType: 'blob',
     headers: {
       Accept: 'application/octet-stream',
     },
   });
+};
+
+/**
+ * Fetches parsed plain-text preview for a stored file (PDF/Office/text/etc. via server parseText).
+ */
+export const getFileTextContent = async (userId: string, file_id: string): Promise<string> => {
+  const res = await request.getResponse<string>(`${endpoints.files()}/text/${userId}/${file_id}`, {
+    responseType: 'text',
+    headers: {
+      Accept: 'text/plain, application/json',
+    },
+  });
+  const data = res.data;
+  return typeof data === 'string' ? data : String(data ?? '');
 };
 
 export const getCodeOutputDownload = async (url: string): Promise<AxiosResponse> => {

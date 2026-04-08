@@ -196,6 +196,13 @@ export default defineConfig(({ command }) => ({
             if (normalizedId.includes('heic-to')) {
               return 'heic-converter';
             }
+            if (
+              normalizedId.includes('react-pdf') ||
+              normalizedId.includes('pdfjs-dist') ||
+              normalizedId.includes('/xlsx')
+            ) {
+              return 'file-preview';
+            }
 
             // Existing chunks
             if (normalizedId.includes('@radix-ui')) {
@@ -266,7 +273,7 @@ export default defineConfig(({ command }) => ({
     },
   },
   optimizeDeps: {
-    include: ['lucide-react', 'framer-motion', '@react-spring/web'],
+    include: ['lucide-react', 'framer-motion', '@react-spring/web', 'react-pdf', 'pdfjs-dist', 'xlsx'],
   },
 }));
 

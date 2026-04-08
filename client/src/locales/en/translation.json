@@ -872,6 +872,8 @@
   "com_ui_detailed": "Detailed",
   "com_ui_disabling": "Disabling...",
   "com_ui_download": "Download",
+  "com_ui_file_preview_need_id": "Cannot preview: file id is missing.",
+  "com_ui_file_preview_truncated": "Preview was truncated; download the file for the full content.",
   "com_ui_download_artifact": "Download Artifact",
   "com_ui_download_backup": "Download Backup Codes",
   "com_ui_download_backup_tooltip": "Before you continue, download your backup codes. You will need them to regain access if you lose your authenticator device",

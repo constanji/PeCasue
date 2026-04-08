@@ -342,7 +342,7 @@ async function uploadVectorsLocal({ req, file, file_id, entity_id, storageMetada
       throw new Error(`文件不存在: ${file.path}`);
     }
     
-    // 🔥 修复文件名编码问题（Latin1 → UTF-8）
+    // 修复文件名编码问题（Latin1 → UTF-8）
     const fixedFilename = fixFilenameEncoding(file.originalname);
     logger.info(`[uploadVectorsLocal] 开始解析文件: ${fixedFilename} (路径: ${file.path})`);
     
@@ -555,7 +555,7 @@ async function uploadVectorsLocal({ req, file, file_id, entity_id, storageMetada
       userId,
       entity_id,
       file,
-      fixedFilename, // 🔥 传递修复后的文件名
+      fixedFilename, // 传递修复后的文件名
       storageMetadata,
       pool,
       embeddingService,
@@ -609,7 +609,7 @@ async function uploadVectorsLocal({ req, file, file_id, entity_id, storageMetada
 }
 
 async function uploadVectors({ req, file, file_id, entity_id, storageMetadata }) {
-  // 🔥 修复文件名编码问题
+  // 修复文件名编码问题
   const fixedFilename = fixFilenameEncoding(file.originalname);
   logger.info(`[uploadVectors] 开始处理文件向量化: ${fixedFilename}, file_id=${file_id}, entity_id=${entity_id || '无'}`);
   

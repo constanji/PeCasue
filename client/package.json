@@ -115,9 +115,12 @@
     "remark-math": "^6.0.0",
     "remark-supersub": "^1.0.0",
     "sse.js": "^2.5.0",
+    "pdfjs-dist": "^4.10.38",
+    "react-pdf": "^9.2.1",
     "tailwind-merge": "^1.9.1",
     "tailwindcss-animate": "^1.0.5",
     "tailwindcss-radix": "^2.8.0",
+    "xlsx": "^0.18.5",
     "zod": "^3.22.4"
   },
   "devDependencies": {

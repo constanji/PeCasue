@@ -315,16 +315,44 @@ class AgentClient extends BaseClient {
       const attachments = await this.options.attachments;
       const latestMessage = orderedMessages[orderedMessages.length - 1];
 
+      /** 本轮用户在请求体里显式附带的 file_id（与会话里 resend 的其它文件区分） */
+      const requestFileIdSet = new Set(
+        (this.options.req?.body?.files ?? []).map((f) => f?.file_id).filter(Boolean),
+      );
+
+      const matchedThisTurn = attachments.filter(
+        (f) => f?.file_id && requestFileIdSet.has(f.file_id),
+      );
+
+      let effectiveProcess = attachments;
+      let effectiveExtract = [];
+
+      if (requestFileIdSet.size > 0) {
+        if (matchedThisTurn.length > 0) {
+          effectiveProcess = matchedThisTurn;
+          effectiveExtract = matchedThisTurn;
+        } else {
+          logger.warn(
+            '[AgentClient] req.body.files 中的 file_id 在 attachments 中未找到，回退为完整附件列表（仅 process，不注入全文）',
+          );
+          effectiveProcess = attachments;
+          effectiveExtract = [];
+        }
+      } else {
+        // 纯文字跟进：不把历史附件全文再塞进 system；resendFiles 仍可通过 process 侧带上多模态
+        effectiveExtract = [];
+      }
+
       if (this.message_file_map) {
-        this.message_file_map[latestMessage.messageId] = attachments;
+        this.message_file_map[latestMessage.messageId] = effectiveProcess;
       } else {
         this.message_file_map = {
-          [latestMessage.messageId]: attachments,
+          [latestMessage.messageId]: effectiveProcess,
         };
       }
 
-      await this.addFileContextToMessage(latestMessage, attachments);
-      const files = await this.processAttachments(latestMessage, attachments);
+      await this.addFileContextToMessage(latestMessage, effectiveExtract);
+      const files = await this.processAttachments(latestMessage, effectiveProcess);
 
       this.options.attachments = files;
     }
@@ -337,6 +365,8 @@ class AgentClient extends BaseClient {
       );
     }
 
+    const latestMessageId = orderedMessages[orderedMessages.length - 1]?.messageId;
+
     const formattedMessages = orderedMessages.map((message, i) => {
       const formattedMessage = formatMessage({
         message,
@@ -344,16 +374,9 @@ class AgentClient extends BaseClient {
         assistantName: this.options?.modelLabel,
       });
 
-      if (message.fileContext && i !== orderedMessages.length - 1) {
-        if (typeof formattedMessage.content === 'string') {
-          formattedMessage.content = message.fileContext + '\n' + formattedMessage.content;
-        } else {
-          const textPart = formattedMessage.content.find((part) => part.type === 'text');
-          textPart
-            ? (textPart.text = message.fileContext + '\n' + textPart.text)
-            : formattedMessage.content.unshift({ type: 'text', text: message.fileContext });
-        }
-      } else if (message.fileContext && i === orderedMessages.length - 1) {
+      // 仅将「当前轮」附件全文注入系统区；不要把历史用户消息的 fileContext 拼进正文，
+      // 否则每一轮请求都会重复携带上一轮文档全文，模型会优先跟着旧文档回答。
+      if (message.fileContext && i === orderedMessages.length - 1) {
         systemContent = [systemContent, message.fileContext].join('\n');
       }
 
@@ -366,7 +389,11 @@ class AgentClient extends BaseClient {
       }
 
       /* If message has files, calculate image token cost */
-      if (this.message_file_map && this.message_file_map[message.messageId]) {
+      if (
+        this.message_file_map &&
+        this.message_file_map[message.messageId] &&
+        message.messageId === latestMessageId
+      ) {
         const attachments = this.message_file_map[message.messageId];
         for (const file of attachments) {
           if (file.embedded) {
@@ -603,6 +630,27 @@ class AgentClient extends BaseClient {
   }
 
   /**
+   * LangChain {@link getBufferString} 仅支持 human/ai/system/function/tool/generic。
+   * 图里的 RemoveMessage（remove）、或异常消息（无 _getType / 返回 undefined）会抛错并导致记忆/QA 子流程失败。
+   * @param {import('@langchain/core/messages').BaseMessage[]} messages
+   * @returns {import('@langchain/core/messages').BaseMessage[]}
+   */
+  sanitizeMessagesForBufferString(messages) {
+    const allowed = new Set(['human', 'ai', 'system', 'function', 'tool', 'generic']);
+    return messages.filter((m) => {
+      if (m == null || typeof m._getType !== 'function') {
+        return false;
+      }
+      try {
+        const t = m._getType();
+        return t != null && allowed.has(t);
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /**
    * Filters out image URLs from message content
    * @param {BaseMessage} message - The message to filter
    * @returns {BaseMessage} - A new message with image URLs removed
@@ -664,7 +712,14 @@ class AgentClient extends BaseClient {
       }
 
       const filteredMessages = messagesToProcess.map((msg) => this.filterImageUrls(msg));
-      const bufferString = getBufferString(filteredMessages);
+      const safeMessages = this.sanitizeMessagesForBufferString(filteredMessages);
+      if (safeMessages.length === 0) {
+        logger.debug(
+          '[AgentClient] runMemory: 无可用消息供 getBufferString（可能均为 remove/异常类型），跳过记忆处理',
+        );
+        return;
+      }
+      const bufferString = getBufferString(safeMessages);
       const bufferMessage = new HumanMessage(`# Current Chat:\n\n${bufferString}`);
       const memoryResult = await this.processMemory([bufferMessage]);
       
@@ -816,7 +871,14 @@ class AgentClient extends BaseClient {
       }
 
       const filteredMessages = messagesToProcess.map((msg) => this.filterImageUrls(msg));
-      const bufferString = getBufferString(filteredMessages);
+      const safeMessages = this.sanitizeMessagesForBufferString(filteredMessages);
+      if (safeMessages.length === 0) {
+        logger.debug(
+          '[AgentClient] runQAExtractor: 无可用消息供 getBufferString，跳过 QA 提取',
+        );
+        return;
+      }
+      const bufferString = getBufferString(safeMessages);
       const bufferMessage = new HumanMessage(`# Current Chat:\n\n${bufferString}`);
       const qaResult = await this.processQAExtractor([bufferMessage]);
       

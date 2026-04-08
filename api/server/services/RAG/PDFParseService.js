@@ -52,7 +52,7 @@ class PDFParseService {
 
   /**
    * 清理文本：移除 NUL 字符和控制字符（PostgreSQL 杀手）
-   * 🔥 必须在 detectPDFType 之前调用，否则会导致数据库写入失败
+   * 必须在 detectPDFType 之前调用，否则会导致数据库写入失败
    * 
    * @param {string} text - 原始文本
    * @returns {string} 清理后的文本
@@ -339,7 +339,7 @@ class PDFParseService {
 
       chunkText = chunkText.trim();
       if (chunkText.length > 0) {
-        // 🔥 防御式：再次 sanitize（确保没有 NUL 字符）
+        // 防御式：再次 sanitize（确保没有 NUL 字符）
         chunkText = this.sanitizeText(chunkText);
         
         if (chunkText.length > 0) {
@@ -399,7 +399,7 @@ class PDFParseService {
       logger.info('[PDFParseService] 开始解析PDF文件');
       const parseResult = await this.parseTextPDF(pdfPathOrBuffer);
       
-      // 2. 🔥 先做 UTF-8 / NUL 清洗（必须在 detect 之前）
+      // 2. 先做 UTF-8 / NUL 清洗（必须在 detect 之前）
       logger.info('[PDFParseService] 开始 sanitize 文本（清理 NUL 字符）');
       const sanitizedText = this.sanitizeText(parseResult.text);
       

@@ -89,8 +89,14 @@ class ExcelParseService {
 
         if (!jsonData || jsonData.length === 0) continue;
 
-        const mdTable = this._jsonToMarkdownTable(jsonData, sheetName);
-        if (mdTable) {
+        let mdTable = this._jsonToMarkdownTable(jsonData, sheetName);
+        if (!mdTable || !mdTable.trim()) {
+          const csv = this.XLSX.utils.sheet_to_csv(sheet, { FS: ',', blankrows: false });
+          if (csv && csv.trim()) {
+            mdTable = `### Sheet: ${sheetName}\n\n\`\`\`csv\n${csv.trim()}\n\`\`\``;
+          }
+        }
+        if (mdTable && mdTable.trim()) {
           sheetTexts.push(mdTable);
           sheetMeta.push({
             sheet_name: sheetName,
@@ -137,9 +143,21 @@ class ExcelParseService {
     const headers = jsonData[0].map(h => String(h ?? '').trim());
     const hasHeaders = headers.some(h => h.length > 0);
 
-    if (!hasHeaders && jsonData.length <= 1) return '';
+    // 仅一行且无表头：仍作为一行数据输出（避免误判为空）
+    if (!hasHeaders && jsonData.length === 1) {
+      const row = jsonData[0] || [];
+      const cells = row.map((c) => String(c ?? '').trim().replace(/\|/g, '\\|').replace(/\n/g, ' '));
+      if (!cells.some((c) => c.length > 0)) {
+        return '';
+      }
+      const colCount = Math.max(row.length, 1);
+      const nh = Array.from({ length: colCount }, (_, i) => `Col${i + 1}`);
+      const line = '| ' + nh.join(' | ') + ' |\n| ' + nh.map(() => '---').join(' | ') + ' |\n| ' + cells.join(' | ') + ' |';
+      return [`### Sheet: ${sheetName}`, '', line].join('\n');
+    }
 
-    const colCount = Math.max(...jsonData.map(r => r.length));
+    const colCount = Math.max(...jsonData.map(r => r.length), 0);
+    if (colCount === 0) return '';
     const normalizedHeaders = [];
     for (let i = 0; i < colCount; i++) {
       normalizedHeaders.push(headers[i] || `Col${i + 1}`);
