@@ -44,6 +44,7 @@ const {
   BeCauseSkills,
   BeCauseSkills2,
   SemanticModelGenerator,
+  GenerateExcel,
 } = require('../');
 const { primeFiles: primeCodeFiles } = require('~/server/services/Files/Code/process');
 const { createFileSearchTool, primeFiles: primeSearchFiles } = require('./fileSearch');
@@ -198,6 +199,7 @@ const loadTools = async ({
     bazi_astrology: BaziAstrology,
     sql_executor: SqlExecutor,
     semantic_model_generator: SemanticModelGenerator,
+    generate_excel: GenerateExcel,
   };
 
   const customConstructors = {
@@ -293,6 +295,10 @@ const loadTools = async ({
     semantic_model_generator: {
       projectRoot: paths.root,
       sqlApiUrl: process.env.SQL_API_URL || 'http://localhost:3001',
+    },
+    generate_excel: {
+      req: options.req,
+      res: options.res,
     },
   };
 

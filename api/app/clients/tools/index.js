@@ -21,6 +21,7 @@ const BeCause = require('./structured/BeCause');
 const BeCauseSkills = require('./structured/BeCauseSkills');
 const BeCauseSkills2 = require('./structured/BeCauseSkills2');
 const SemanticModelGenerator = require('./structured/SemanticModelGenerator');
+const GenerateExcel = require('./structured/GenerateExcel');
 
 module.exports = {
   ...manifest,
@@ -45,4 +46,5 @@ module.exports = {
   BeCauseSkills,
   BeCauseSkills2,
   SemanticModelGenerator,
+  GenerateExcel,
 };

@@ -24,6 +24,7 @@ import AgentBuilder from './AgentBuilder';
 import GlobalConfigManager from './GlobalConfigManager';
 import AssetCenterManager from './AssetCenterManager';
 import Benchmark from './Benchmark';
+import ExcelGenerateDemo from './ExcelGenerateDemo';
 import Result from './Result';
 
 const AuthLayout = () => (
@@ -147,6 +148,10 @@ export const router = createBrowserRouter(
             {
               path: 'benchmark',
               element: <Benchmark />,
+            },
+            {
+              path: 'excel-demo',
+              element: <ExcelGenerateDemo />,
             },
             {
               path: 'result/:taskId',

@@ -222,5 +222,12 @@
     "description": "语义模型生成工具，基于模板系统生成高质量的语义模型文档。Commands: generate-spec (生成语义模型规范), generate-implementation-plan (生成实施计划), generate-task-checklist (生成任务清单), generate-consistency-analysis (生成一致性分析), generate-quality-checklist (生成质量检查清单), generate-project-principles (生成项目原则), list-templates (列出所有可用模板), readme (查看模板系统说明)。该工具集成了数据库查询能力（通过 database_schema 和 sql_executor），可以在生成语义模型时自动查询和分析数据库结构。",
     "icon": "📋",
     "authConfig": []
+  },
+  {
+    "name": "生成 Excel",
+    "pluginKey": "generate_excel",
+    "description": "根据 JSON 规范（多 sheet、表头、数据行、可选样式与公式）生成 .xlsx 并保存到用户文件空间，返回 file_id 供下载或作为对话附件引用。与文件接口 POST /api/files/generate-excel 使用同一套校验与存储逻辑。",
+    "icon": "📗",
+    "authConfig": []
   }
 ]

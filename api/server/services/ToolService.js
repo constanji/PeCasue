@@ -630,7 +630,7 @@ async function loadAgentTools({ req, res, agent, signal, tool_resources, openAIA
       description: tool.description,
     };
 
-    if (imageGenTools.has(tool.name)) {
+    if (imageGenTools.has(tool.name) || tool.name === 'generate_excel') {
       toolDefinition.responseFormat = 'content_and_artifact';
     }
 

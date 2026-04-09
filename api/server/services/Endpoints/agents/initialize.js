@@ -68,6 +68,8 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
   const collectedUsage = [];
   /** @type {ArtifactPromises} */
   const artifactPromises = [];
+  /** 供工具内部直接推送附件 promise（绕过 on_tool_end 管线） */
+  req._artifactPromises = artifactPromises;
   const { contentParts, aggregateContent } = createContentAggregator();
   const toolEndCallback = createToolEndCallback({ req, res, artifactPromises });
   const eventHandlers = getDefaultHandlers({

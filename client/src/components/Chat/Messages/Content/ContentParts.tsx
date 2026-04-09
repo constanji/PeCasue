@@ -11,6 +11,7 @@ import MemoryArtifacts from './MemoryArtifacts';
 import Sources from '~/components/Web/Sources';
 import { mapAttachments } from '~/utils/map';
 import { EditTextPart } from './Parts';
+import { AttachmentGroup } from './Parts/Attachment';
 import Part from './Part';
 import MessageUIResources from './MessageUIResources';
 import { extractChartDataFromToolOutput } from './ChartRenderer';
@@ -199,6 +200,32 @@ const ContentParts = memo(
       return ids;
     }, [filteredContent]);
 
+    // filteredContent 会过滤掉大部分 TOOL_CALL（只保留图表），
+    // 被过滤掉的 TOOL_CALL 对应的文件附件需要在消息底部额外渲染
+    const unrenderedFileAttachments = useMemo(() => {
+      if (!attachments || attachments.length === 0) {
+        return [];
+      }
+      const visibleToolCallIds = new Set<string>();
+      filteredContent.forEach((part) => {
+        if (part?.type === ContentTypes.TOOL_CALL) {
+          const tc = part[ContentTypes.TOOL_CALL] as Agents.ToolCall | undefined;
+          if (tc?.id) {
+            visibleToolCallIds.add(tc.id);
+          }
+        }
+      });
+      return attachments.filter((att) => {
+        if (!att?.toolCallId || !att.filepath) {
+          return false;
+        }
+        if (att.type === Tools.ui_resources || att.type === Tools.web_search) {
+          return false;
+        }
+        return !visibleToolCallIds.has(att.toolCallId) && !renderedToolCallIds.has(att.toolCallId);
+      });
+    }, [attachments, filteredContent, renderedToolCallIds]);
+
     return (
       <>
         <SearchContext.Provider value={{ searchResults }}>
@@ -260,7 +287,9 @@ const ContentParts = memo(
               </MessageContext.Provider>
             );
           })}
-          {/* 在消息末尾统一渲染所有未关联的 ui_resources */}
+          {!isCreatedByUser && unrenderedFileAttachments.length > 0 && (
+            <AttachmentGroup attachments={unrenderedFileAttachments} />
+          )}
           {!isCreatedByUser && (
             <MessageUIResources 
               attachments={attachments} 

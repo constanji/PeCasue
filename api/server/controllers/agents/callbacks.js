@@ -20,6 +20,7 @@ const { processFileCitations } = require("~/server/services/Files/Citations");
 const { processCodeOutput } = require("~/server/services/Files/Code/process");
 const { loadAuthValues } = require("~/server/services/Tools/credentials");
 const { saveBase64Image } = require("~/server/services/Files/process");
+const { findFileById } = require("~/models/File");
 
 class ModelEndHandler {
   /**
@@ -506,11 +507,109 @@ function getDefaultHandlers({
  */
 function createToolEndCallback({ req, res, artifactPromises }) {
   /**
+   * @param {string} genFileId
+   * @param {object} output
+   * @param {Record<string, unknown>} metadata
+   */
+  const scheduleGenerateExcelFileAttachment = (genFileId, output, metadata) => {
+    const toolCallId = output?.tool_call_id ?? output?.id ?? "";
+    artifactPromises.push(
+      (async () => {
+        const file = await findFileById(genFileId, { user: req.user.id });
+        if (!file?.filepath) {
+          logger.warn(
+            `[createToolEndCallback] generate_excel: 未找到文件或缺少 filepath file_id=${genFileId}`,
+          );
+          return null;
+        }
+        const fileMetadata = Object.assign({}, file, {
+          messageId: metadata.run_id,
+          toolCallId,
+          conversationId: metadata.thread_id,
+        });
+        logger.info(
+          `[createToolEndCallback] generate_excel 附件写入 file_id=${genFileId} messageId=${metadata.run_id} toolCallId=${toolCallId} headersSent=${res.headersSent}`,
+        );
+        if (!res.headersSent) {
+          return fileMetadata;
+        }
+        res.write(`event: attachment\ndata: ${JSON.stringify(fileMetadata)}\n\n`);
+        logger.info("[createToolEndCallback] generate_excel SSE attachment 已写入");
+        return fileMetadata;
+      })().catch((error) => {
+        logger.error("Error processing generate_excel attachment:", error);
+        return null;
+      }),
+    );
+  };
+
+  /**
    * @type {ToolEndCallback}
    */
   return async (data, metadata) => {
     const output = data?.output;
     if (!output) {
+      return;
+    }
+
+    /* -------- 入口诊断日志（仅在 output 可能来自 generate_excel 时打印） -------- */
+    const _isExcelCandidate =
+      output?.name === "generate_excel" ||
+      output?.artifact?.generate_excel ||
+      (typeof output?.content === "string" && output.content.includes("file_id"));
+    if (_isExcelCandidate) {
+      logger.info(
+        `[createToolEndCallback] generate_excel candidate 入口 ` +
+        `type=${typeof output} ctor=${output?.constructor?.name} name=${output?.name} ` +
+        `hasArtifact=${!!output?.artifact} tool_call_id=${output?.tool_call_id} ` +
+        `metadataRunId=${metadata?.run_id} metadataThreadId=${metadata?.thread_id}`,
+      );
+    }
+
+    /**
+     * generate_excel：LangGraph stream 里的 ToolMessage 经常只剩 content 字符串，artifact 被丢掉，
+     * 若先判断 !output.artifact 会直接 return，附件永远不会发出。
+     * 策略：artifact → output.name + content parse → 纯 content parse（不依赖 name）。
+     */
+    const genExcelFromArtifact = output.artifact?.generate_excel?.file_id;
+
+    let genExcelFromContent = null;
+    if (!genExcelFromArtifact) {
+      const raw =
+        typeof output?.content === "string"
+          ? output.content
+          : typeof output === "string"
+            ? output
+            : null;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (
+            parsed?.success === true &&
+            typeof parsed.file_id === "string" &&
+            typeof parsed.mime === "string" &&
+            parsed.mime.includes("spreadsheetml")
+          ) {
+            genExcelFromContent = parsed.file_id;
+          }
+        } catch (_e) {
+          // 非 JSON 忽略
+        }
+      }
+    }
+
+    const genExcelFileId = genExcelFromArtifact || genExcelFromContent;
+    if (genExcelFileId) {
+      if (req._pushedExcelFileIds?.has(genExcelFileId)) {
+        logger.info(
+          `[createToolEndCallback] generate_excel 已由工具直推，跳过 file_id=${genExcelFileId}`,
+        );
+        return;
+      }
+      logger.info(
+        `[createToolEndCallback] generate_excel 匹配成功 source=${genExcelFromArtifact ? "artifact" : "content"} file_id=${genExcelFileId} tool_call_id=${output?.tool_call_id}`,
+      );
+      scheduleGenerateExcelFileAttachment(genExcelFileId, output, metadata);
       return;
     }
 

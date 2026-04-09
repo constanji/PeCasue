@@ -683,6 +683,34 @@ export const uploadAgentAvatar = (data: m.AgentAvatarVariables): Promise<a.Agent
   );
 };
 
+/** 与 POST /api/files/generate-excel 请求体对齐（最小字段集，扩展见 Excel 生成服务设计） */
+export type GenerateExcelBody = {
+  fileName?: string;
+  ttlHours?: number;
+  context?: Record<string, unknown>;
+  sheets: Array<{
+    name: string;
+    columns: string[];
+    rows: unknown[][];
+    styles?: Record<string, unknown>;
+    formulas?: Array<{ ref: string; formula: string }>;
+  }>;
+};
+
+export type GenerateExcelResult = {
+  file_id: string;
+  filename: string;
+  size: number;
+  mime: string;
+};
+
+/**
+ * 服务端根据 JSON 规范生成 .xlsx 并入库，返回 file_id（下载用 getFileDownload(..., { original: true })）。
+ */
+export const generateExcel = async (body: GenerateExcelBody): Promise<GenerateExcelResult> => {
+  return request.post(`${endpoints.files()}/generate-excel`, body) as Promise<GenerateExcelResult>;
+};
+
 export const getFileDownload = async (
   userId: string,
   file_id: string,

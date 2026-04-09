@@ -32,8 +32,32 @@ const { getAssistant } = require('~/models/Assistant');
 const { getAgent } = require('~/models/Agent');
 const { getLogStores } = require('~/cache');
 const { Readable } = require('stream');
+const ExcelGenerateService = require('~/server/services/Files/ExcelGenerateService');
 
 const router = express.Router();
+
+const generateExcelJsonLimit = process.env.MAX_GENERATE_EXCEL_BODY || '2mb';
+const parseGenerateExcelBody = express.json({ limit: generateExcelJsonLimit });
+
+/**
+ * POST /files/generate-excel
+ * JSON 规范生成 .xlsx，返回 file_id（下载走现有 GET /files/download/:userId/:file_id?original=1）
+ */
+router.post('/generate-excel', parseGenerateExcelBody, async (req, res) => {
+  try {
+    const result = await ExcelGenerateService.generateFromSpec(req, req.body);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.status(200).json(result);
+  } catch (error) {
+    const status = error.statusCode && Number.isInteger(error.statusCode) ? error.statusCode : 500;
+    logger.error('[files/generate-excel]', error);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.status(status).json({
+      error: status === 500 ? '生成 Excel 失败' : error.message,
+      message: error.message,
+    });
+  }
+});
 
 router.get('/', async (req, res) => {
   try {

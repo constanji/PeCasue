@@ -11,7 +11,10 @@ jest.mock('@because/api', () => ({
 
 jest.mock('@because/data-schemas', () => ({
   logger: {
+    info: jest.fn(),
+    warn: jest.fn(),
     error: jest.fn(),
+    debug: jest.fn(),
   },
 }));
 
@@ -39,6 +42,10 @@ jest.mock('~/server/services/Tools/credentials', () => ({
 
 jest.mock('~/server/services/Files/process', () => ({
   saveBase64Image: jest.fn(),
+}));
+
+jest.mock('~/models/File', () => ({
+  findFileById: jest.fn(),
 }));
 
 describe('createToolEndCallback', () => {
@@ -239,6 +246,121 @@ describe('createToolEndCallback', () => {
 
       expect(artifactPromises).toHaveLength(0);
       expect(res.write).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('generate_excel artifact handling', () => {
+    it('should attach file metadata when generate_excel artifact has file_id', async () => {
+      const { findFileById } = require('~/models/File');
+      findFileById.mockResolvedValue({
+        file_id: '76396f18-48ce-4693-908f-e80074f12301',
+        filename: 'summary.xlsx',
+        filepath: '/uploads/user123/76396f18-48ce-4693-908f-e80074f12301__summary.xlsx',
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        user: 'user123',
+      });
+
+      const toolEndCallback = createToolEndCallback({ req, res, artifactPromises });
+
+      const output = {
+        tool_call_id: 'call-gen-1',
+        artifact: {
+          generate_excel: {
+            file_id: '76396f18-48ce-4693-908f-e80074f12301',
+            filename: 'summary.xlsx',
+            size: 2048,
+            mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          },
+        },
+      };
+
+      const metadata = {
+        run_id: 'run456',
+        thread_id: 'thread789',
+      };
+
+      await toolEndCallback({ output }, metadata);
+      const results = await Promise.all(artifactPromises);
+
+      expect(findFileById).toHaveBeenCalledWith('76396f18-48ce-4693-908f-e80074f12301', {
+        user: 'user123',
+      });
+      expect(results[0]).toMatchObject({
+        file_id: '76396f18-48ce-4693-908f-e80074f12301',
+        filepath: expect.any(String),
+        messageId: 'run456',
+        toolCallId: 'call-gen-1',
+        conversationId: 'thread789',
+      });
+    });
+
+    it('should attach from tool content JSON when artifact is missing (stream ToolMessage)', async () => {
+      const { findFileById } = require('~/models/File');
+      findFileById.mockResolvedValue({
+        file_id: '779cf9d5-0947-4940-85e0-777722a6fd76',
+        filename: '归纳.xlsx',
+        filepath: '/uploads/user123/779cf9d5__归纳.xlsx',
+        user: 'user123',
+      });
+
+      const toolEndCallback = createToolEndCallback({ req, res, artifactPromises });
+
+      const output = {
+        name: 'generate_excel',
+        tool_call_id: 'call-2',
+        content: JSON.stringify({
+          success: true,
+          file_id: '779cf9d5-0947-4940-85e0-777722a6fd76',
+          filename: '归纳.xlsx',
+          mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+      };
+
+      await toolEndCallback({ output }, {
+        run_id: 'run456',
+        thread_id: 'thread789',
+      });
+      const results = await Promise.all(artifactPromises);
+
+      expect(findFileById).toHaveBeenCalledWith('779cf9d5-0947-4940-85e0-777722a6fd76', {
+        user: 'user123',
+      });
+      expect(results[0]).toMatchObject({
+        file_id: '779cf9d5-0947-4940-85e0-777722a6fd76',
+        messageId: 'run456',
+        toolCallId: 'call-2',
+      });
+    });
+
+    it('should attach when output is a plain string (no ToolMessage wrapper)', async () => {
+      const { findFileById } = require('~/models/File');
+      findFileById.mockResolvedValue({
+        file_id: 'plain-str-fid',
+        filename: 'plain.xlsx',
+        filepath: '/uploads/user123/plain.xlsx',
+        user: 'user123',
+      });
+
+      const toolEndCallback = createToolEndCallback({ req, res, artifactPromises });
+
+      const rawContent = JSON.stringify({
+        success: true,
+        file_id: 'plain-str-fid',
+        filename: 'plain.xlsx',
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      await toolEndCallback({ output: rawContent }, {
+        run_id: 'run456',
+        thread_id: 'thread789',
+      });
+      const results = await Promise.all(artifactPromises);
+
+      expect(findFileById).toHaveBeenCalledWith('plain-str-fid', { user: 'user123' });
+      expect(results[0]).toMatchObject({
+        file_id: 'plain-str-fid',
+        messageId: 'run456',
+      });
     });
   });
 
