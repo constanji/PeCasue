@@ -8,11 +8,12 @@ import {
   OGDialogTitle,
 } from '@because/client';
 import { dataService } from '@because/data-provider';
+import { useFileDownload } from '~/data-provider';
 import type { TAttachment, TFile } from '@because/data-provider';
+import { useToastContext } from '@because/client';
 import { Loader2 } from 'lucide-react';
 import { useAuthContext } from '~/hooks/AuthContext';
 import { useLocalize } from '~/hooks';
-import { useAttachmentLink } from '../LogLink';
 import PdfNativeViewer from './PdfNativeViewer';
 import { needsNativeBlob, resolvePreviewKind } from './resolvePreviewKind';
 import SpreadsheetNativeViewer from './SpreadsheetNativeViewer';
@@ -51,10 +52,12 @@ function parseErrorMessage(err: unknown): string {
  */
 export default function FilePreviewDialog({ open, onOpenChange, attachment }: FilePreviewDialogProps) {
   const localize = useLocalize();
+  const { showToast } = useToastContext();
   const { user } = useAuthContext();
   const file_id = (attachment as TFile).file_id;
   const filename = attachment.filename ?? '';
-  const filepath = attachment.filepath ?? '';
+
+  const { refetch: downloadOriginal } = useFileDownload(user?.id, file_id, { original: true });
 
   const kind = useMemo(
     () => resolvePreviewKind(attachment.type, attachment.filename),
@@ -67,10 +70,34 @@ export default function FilePreviewDialog({ open, onOpenChange, attachment }: Fi
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
 
-  const { handleDownload } = useAttachmentLink({
-    href: filepath,
-    filename,
-  });
+  const handleDownload = useCallback(
+    async (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      if (!user?.id || !file_id) {
+        showToast({ status: 'error', message: localize('com_ui_download_error') });
+        return;
+      }
+      try {
+        const result = await downloadOriginal();
+        const url = result.data;
+        if (url == null || url === '') {
+          showToast({ status: 'error', message: localize('com_ui_download_error') });
+          return;
+        }
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('[FilePreviewDialog] download failed', err);
+        showToast({ status: 'error', message: localize('com_ui_download_error') });
+      }
+    },
+    [user?.id, file_id, downloadOriginal, filename, localize, showToast],
+  );
 
   const onPdfRenderError = useCallback((msg: string) => {
     console.warn('[FilePreviewDialog] PDF 原生预览失败，回退 /files/text:', msg);

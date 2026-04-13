@@ -53,16 +53,23 @@ export const useGetFileConfig = <TData = t.FileConfig>(
   );
 };
 
-export const useFileDownload = (userId?: string, file_id?: string): QueryObserverResult<string> => {
+export const useFileDownload = (
+  userId?: string,
+  file_id?: string,
+  options?: { original?: boolean },
+): QueryObserverResult<string> => {
   const queryClient = useQueryClient();
+  const wantOriginal = options?.original === true;
   return useQuery(
-    [QueryKeys.fileDownload, file_id],
+    [QueryKeys.fileDownload, file_id, wantOriginal ? 'original' : 'default'],
     async () => {
       if (!userId || !file_id) {
         console.warn('No user ID provided for file download');
         return;
       }
-      const response = await dataService.getFileDownload(userId, file_id);
+      const response = await dataService.getFileDownload(userId, file_id, {
+        original: wantOriginal,
+      });
       const blob = response.data;
       const downloadURL = window.URL.createObjectURL(blob);
       try {

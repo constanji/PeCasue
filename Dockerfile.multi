@@ -12,18 +12,67 @@ WORKDIR /app
 # 安装 vips 以便 sharp 可以使用系统 libvips，避免下载二进制文件
 # 安装 jemalloc（可选，用于内存优化）
 # Debian 自带 glibc，无需额外安装，完美支持 onnxruntime-node
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# buildx 容器内直连 deb.debian.org 常失败；统一换阿里云并加 apt 重试（exit 100 多为拉包超时/源未改全）
+# 注意：Dockerfile 里勿用 "$$1" 传参给函数，BuildKit 会错误展开成字面量 "11"；改用循环 + "$$f"
+RUN set -eux; \
+  export DEBIAN_FRONTEND=noninteractive; \
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
+    [ -f "$$f" ] || continue; \
+    sed -i \
+      -e 's|http://deb.debian.org|https://mirrors.aliyun.com|g' \
+      -e 's|https://deb.debian.org|https://mirrors.aliyun.com|g' \
+      -e 's|http://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+      -e 's|https://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+      -e 's|http://security.debian.org|https://mirrors.aliyun.com/debian-security|g' \
+      -e 's|https://security.debian.org|https://mirrors.aliyun.com/debian-security|g' \
+      "$$f"; \
+  done; \
+  if [ -d /etc/apt/sources.list.d ]; then \
+    for f in /etc/apt/sources.list.d/*.list; do [ -f "$$f" ] || continue; \
+      sed -i \
+        -e 's|http://deb.debian.org|https://mirrors.aliyun.com|g' \
+        -e 's|https://deb.debian.org|https://mirrors.aliyun.com|g' \
+        -e 's|http://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+        -e 's|https://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+        -e 's|http://security.debian.org|https://mirrors.aliyun.com/debian-security|g' \
+        -e 's|https://security.debian.org|https://mirrors.aliyun.com/debian-security|g' \
+        "$$f"; \
+    done; \
+  fi; \
+  apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update; \
+  apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 install -y --no-install-recommends \
     curl \
     python3 \
     python3-pip \
     build-essential \
+    pkg-config \
     libvips \
     libvips-dev \
     ca-certificates \
     libjemalloc2 \
-    && rm -rf /var/lib/apt/lists/*
-# Set environment variable to use jemalloc
-ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+  && rm -rf /var/lib/apt/lists/*
+# sharp 0.33+：可用 SHARP_FORCE_GLOBAL_LIBVIPS 跳过下载
+ENV SHARP_FORCE_GLOBAL_LIBVIPS=1
+# sharp 0.32（@xenova/transformers 嵌套依赖）：用 pkg-config 检测 vips-cpp，Debian 多架构 .pc 在 /usr/lib/<triplet>/pkgconfig
+# 默认 PATH 不含该目录 → 检测失败 → 走 GitHub 下载 → 国内易 aborted；显式设置后走「检测到系统 libvips → node-gyp 编译」分支
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/arm-linux-gnueabihf/pkgconfig
+# jemalloc 库路径随 CPU 架构变化，不可写死 x86_64（arm64 构建会找不到文件并报 ld.so 错误，进而干扰 sharp 等 native 安装）
+# 容器启动时按 dpkg 架构设置 LD_PRELOAD（构建阶段不再设置错误的 ENV）
+RUN printf '%s\n' \
+    '#!/bin/sh' \
+    'set -e' \
+    'ARCH=$(dpkg --print-architecture)' \
+    'case "$ARCH" in' \
+    '  amd64) T=x86_64-linux-gnu ;;' \
+    '  arm64) T=aarch64-linux-gnu ;;' \
+    '  armhf) T=arm-linux-gnueabihf ;;' \
+    '  *) T= ;;' \
+    'esac' \
+    'if [ -n "$T" ] && [ -f "/usr/lib/$T/libjemalloc.so.2" ]; then' \
+    '  export LD_PRELOAD="/usr/lib/$T/libjemalloc.so.2"' \
+    'fi' \
+    'exec "$@"' \
+    > /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 # 配置 npm 镜像源和重试设置（解决网络问题）
 RUN npm config set registry https://registry.npmmirror.com && \
     npm config set fetch-retry-maxtimeout 600000 && \
@@ -189,4 +238,5 @@ RUN chmod -R 755 /app/specs && find /app/specs -type f -exec chmod 644 {} \; && 
 WORKDIR /app
 EXPOSE 3080
 ENV HOST=0.0.0.0
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "api/server/index.js"]

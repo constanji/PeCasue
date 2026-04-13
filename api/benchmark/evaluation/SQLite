@@ -342,3 +342,19 @@ Soft-F1              33.33                18.18                7.14             
 ===========================================================================================
 Finished Soft-F1 evaluation for mini dev set
 
+start calculate EX
+                     simple               moderate             challenging          total               
+count                3                    22                   7                    4                   
+======================================    EX   =====================================
+EX                   0.00                 9.09                 0.00                 50.00               
+===========================================================================================
+Finished EX evaluation for mini dev set
+
+start calculate Soft-F1
+                     simple               moderate             challenging          total               
+count                3                    22                   7                    4                   
+======================================    Soft-F1   =====================================
+Soft-F1              0.00                 9.09                 7.14                 62.50               
+===========================================================================================
+Finished Soft-F1 evaluation for mini dev set
+

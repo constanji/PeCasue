@@ -1,20 +1,60 @@
-import { memo, useState, useEffect, type MouseEvent } from 'react';
+import { memo, useState, useEffect, useCallback, type MouseEvent } from 'react';
 import { imageExtRegex, Tools } from '@because/data-provider';
 import type { TAttachment, TFile, TAttachmentMetadata } from '@because/data-provider';
+import { useToastContext } from '@because/client';
 import FileContainer from '~/components/Chat/Input/Files/FileContainer';
 import Image from '~/components/Chat/Messages/Content/Image';
-import { useAttachmentLink } from './LogLink';
 import FileTextPreviewDialog from './FileTextPreviewDialog';
+import { useAuthContext } from '~/hooks/AuthContext';
+import { useLocalize } from '~/hooks';
+import { useFileDownload } from '~/data-provider';
 import { cn } from '~/utils';
 
 const FileAttachment = memo(({ attachment }: { attachment: Partial<TAttachment> }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const localize = useLocalize();
+  const { showToast } = useToastContext();
+  const { user } = useAuthContext();
   const fileId = (attachment as TFile).file_id;
-  const { handleDownload } = useAttachmentLink({
-    href: attachment.filepath ?? '',
-    filename: attachment.filename ?? '',
-  });
+  const { refetch: downloadOriginal } = useFileDownload(user?.id, fileId, { original: true });
+
+  const handleDownload = useCallback(
+    async (e: MouseEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      if (!user?.id || !fileId) {
+        showToast({ status: 'error', message: localize('com_ui_download_error') });
+        return;
+      }
+      try {
+        const result = await downloadOriginal();
+        const url = result.data;
+        if (url == null || url === '') {
+          showToast({ status: 'error', message: localize('com_ui_download_error') });
+          return;
+        }
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', attachment.filename ?? 'file');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('[FileAttachment] download failed', err);
+        showToast({ status: 'error', message: localize('com_ui_download_error') });
+      }
+    },
+    [
+      user?.id,
+      fileId,
+      downloadOriginal,
+      attachment.filename,
+      localize,
+      showToast,
+    ],
+  );
+
   const extension = attachment.filename?.split('.').pop();
 
   useEffect(() => {
