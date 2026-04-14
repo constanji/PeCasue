@@ -88,10 +88,6 @@ api/benchmark/results/
 api/benchmark/data/*.json
 api/benchmark/evaluation/SQLite
 benchmark_results/
-# SQL semantic model dumps & similar artifacts (e.g. semantic_model_*_*.json)
-sqlSemantic/
-# Local copy bundle from scripts/copy-benchmark-to-bench.js
-Bench/
 owner.yml
 archive
 .vscode/settings.json
