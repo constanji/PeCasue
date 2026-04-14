@@ -1,9 +1,29 @@
+const path = require('path');
+const { pathToFileURL } = require('url');
 const { ytToolkit } = require('@because/api');
 const { tool } = require('@langchain/core/tools');
 const { youtube } = require('@googleapis/youtube');
 const { logger } = require('@because/data-schemas');
-const { YoutubeTranscript } = require('youtube-transcript');
 const { getApiKey } = require('./credentials');
+
+/**
+ * youtube-transcript@1.3+ has "type":"module" but points `main` at a CJS build, so
+ * require() and bare import() both break. Load the ESM bundle explicitly.
+ */
+let youtubeTranscriptClass;
+async function getYoutubeTranscript() {
+  if (!youtubeTranscriptClass) {
+    const pkgJson = require.resolve('youtube-transcript/package.json');
+    const esmPath = path.join(
+      path.dirname(pkgJson),
+      'dist',
+      'youtube-transcript.esm.js',
+    );
+    const mod = await import(pathToFileURL(esmPath).href);
+    youtubeTranscriptClass = mod.YoutubeTranscript;
+  }
+  return youtubeTranscriptClass;
+}
 
 function extractVideoId(url) {
   const rawIdRegex = /^[a-zA-Z0-9_-]{11}$/;
@@ -108,6 +128,8 @@ function createYouTubeTools(fields = {}) {
     if (!videoId) {
       throw new Error('Invalid YouTube URL or video ID');
     }
+
+    const YoutubeTranscript = await getYoutubeTranscript();
 
     try {
       try {

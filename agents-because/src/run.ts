@@ -356,6 +356,17 @@ export class Run<_T extends t.BaseGraphState> {
           continue;
         }
 
+        /**
+         * Skip on_chat_model_stream events: these are already processed
+         * by the local ChatModelStreamHandler inside attemptInvoke(),
+         * which dispatches ON_MESSAGE_DELTA / ON_REASONING_DELTA directly.
+         * Processing them again here would cause every streamed token to
+         * be sent to the client twice (duplicate SSE events).
+         */
+        if (eventName === GraphEvents.CHAT_MODEL_STREAM) {
+          continue;
+        }
+
         const handler = this.handlerRegistry?.getHandler(eventName);
         if (handler) {
           await handler.handle(eventName, data, metadata, this.Graph);
