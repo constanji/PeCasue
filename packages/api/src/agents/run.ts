@@ -1,25 +1,108 @@
-import { Run, Providers } from '@because/agents';
-import { providerEndpointMap, KnownEndpoints } from '@because/data-provider';
+import { Run, Providers, Constants } from '@because/agents';
+import { providerEndpointMap, KnownEndpoints, type SummarizationConfig } from '@because/data-provider';
 import { logger } from '@because/data-schemas';
 import type {
+  SummarizationConfig as AgentSummarizationConfig,
   MultiAgentGraphConfig,
+  ContextPruningConfig,
   OpenAIClientOptions,
   StandardGraphConfig,
+  LCToolRegistry,
   AgentInputs,
   GenericTool,
   RunConfig,
   IState,
+  LCTool,
 } from '@because/agents';
-import type { IUser } from '@because/data-schemas';
 import type { Agent } from '@because/data-provider';
+import type { BaseMessage } from '@langchain/core/messages';
+import type { IUser } from '@because/data-schemas';
 import type * as t from '~/types';
 import { resolveHeaders, createSafeUser } from '~/utils/env';
+
+/** Expected shape of JSON tool search results */
+interface ToolSearchJsonResult {
+  found?: number;
+  tools?: Array<{ name: string }>;
+}
+
+function parseToolSearchJson(content: string, discoveredTools: Set<string>): boolean {
+  try {
+    const parsed = JSON.parse(content) as ToolSearchJsonResult;
+    if (!parsed.tools || !Array.isArray(parsed.tools)) {
+      return false;
+    }
+    for (const tool of parsed.tools) {
+      if (tool.name && typeof tool.name === 'string') {
+        discoveredTools.add(tool.name);
+      }
+    }
+    return parsed.tools.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function parseToolSearchLegacy(content: string, discoveredTools: Set<string>): void {
+  const toolNameRegex = /^- ([^\s(]+)\s*\(score:/gm;
+  let match: RegExpExecArray | null;
+  while ((match = toolNameRegex.exec(content)) !== null) {
+    const toolName = match[1];
+    if (toolName) {
+      discoveredTools.add(toolName);
+    }
+  }
+}
+
+export function extractDiscoveredToolsFromHistory(messages: BaseMessage[]): Set<string> {
+  const discoveredTools = new Set<string>();
+
+  for (const message of messages) {
+    const msgType = message._getType?.() ?? message.constructor?.name ?? '';
+    if (msgType !== 'tool') {
+      continue;
+    }
+
+    const name = (message as { name?: string }).name;
+    if (name !== Constants.TOOL_SEARCH) {
+      continue;
+    }
+
+    const content = message.content;
+    if (typeof content !== 'string') {
+      continue;
+    }
+
+    if (!parseToolSearchJson(content, discoveredTools)) {
+      parseToolSearchLegacy(content, discoveredTools);
+    }
+  }
+
+  return discoveredTools;
+}
+
+export function overrideDeferLoadingForDiscoveredTools(
+  toolRegistry: LCToolRegistry,
+  discoveredTools: Set<string>,
+): number {
+  let overrideCount = 0;
+  for (const toolName of discoveredTools) {
+    const toolDef = toolRegistry.get(toolName);
+    if (toolDef && toolDef.defer_loading === true) {
+      toolDef.defer_loading = false;
+      overrideCount++;
+    }
+  }
+  return overrideCount;
+}
 
 const customProviders = new Set([
   Providers.XAI,
   Providers.OLLAMA,
   Providers.DEEPSEEK,
   Providers.OPENROUTER,
+  Providers.MOONSHOT,
+  KnownEndpoints.ollama,
 ]);
 
 export function getReasoningKey(
@@ -47,31 +130,74 @@ export function getReasoningKey(
 type RunAgent = Omit<Agent, 'tools'> & {
   tools?: GenericTool[];
   maxContextTokens?: number;
+  baseContextTokens?: number;
   useLegacyContent?: boolean;
   toolContextMap?: Record<string, string>;
+  toolRegistry?: LCToolRegistry;
+  toolDefinitions?: LCTool[];
+  hasDeferredTools?: boolean;
+  summarization?: SummarizationConfig;
+  maxToolResultChars?: number;
 };
 
-/**
- * Creates a new Run instance with custom handlers and configuration.
- *
- * @param options - The options for creating the Run instance.
- * @param options.agents - The agents for this run.
- * @param options.signal - The signal for this run.
- * @param options.runId - Optional run ID; otherwise, a new run ID will be generated.
- * @param options.customHandlers - Custom event handlers.
- * @param options.streaming - Whether to use streaming.
- * @param options.streamUsage - Whether to stream usage information.
- * @returns {Promise<Run<IState>>} A promise that resolves to a new Run instance.
- */
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function shapeSummarizationConfig(
+  config: SummarizationConfig | undefined,
+  fallbackProvider: string,
+  fallbackModel: string | undefined,
+) {
+  const provider = config?.provider ?? fallbackProvider;
+  const model = config?.model ?? fallbackModel;
+  const trigger =
+    config?.trigger?.type && config?.trigger?.value
+      ? { type: config.trigger.type, value: config.trigger.value }
+      : undefined;
+
+  return {
+    enabled: config?.enabled !== false && isNonEmptyString(provider) && isNonEmptyString(model),
+    config: {
+      trigger,
+      provider,
+      model,
+      parameters: config?.parameters,
+      prompt: config?.prompt,
+      updatePrompt: config?.updatePrompt,
+      reserveRatio: config?.reserveRatio,
+      maxSummaryTokens: config?.maxSummaryTokens,
+    } satisfies AgentSummarizationConfig,
+    contextPruning: config?.contextPruning as ContextPruningConfig | undefined,
+    reserveRatio: config?.reserveRatio,
+  };
+}
+
+function computeEffectiveMaxContextTokens(
+  reserveRatio: number | undefined,
+  baseContextTokens: number | undefined,
+  maxContextTokens: number | undefined,
+): number | undefined {
+  if (reserveRatio == null || reserveRatio <= 0 || reserveRatio >= 1 || baseContextTokens == null) {
+    return maxContextTokens;
+  }
+  const ratioComputed = Math.max(1024, Math.round(baseContextTokens * (1 - reserveRatio)));
+  return Math.min(maxContextTokens ?? ratioComputed, ratioComputed);
+}
+
 export async function createRun({
   runId,
   signal,
   agents,
+  messages,
   requestBody,
   user,
   tokenCounter,
   customHandlers,
   indexTokenCountMap,
+  summarizationConfig,
+  initialSummary,
+  calibrationRatio,
   streaming = true,
   streamUsage = true,
 }: {
@@ -82,15 +208,33 @@ export async function createRun({
   streamUsage?: boolean;
   requestBody?: t.RequestBody;
   user?: IUser;
+  messages?: BaseMessage[];
+  summarizationConfig?: SummarizationConfig;
+  initialSummary?: { text: string; tokenCount: number };
+  calibrationRatio?: number;
 } & Pick<RunConfig, 'tokenCounter' | 'customHandlers' | 'indexTokenCountMap'>): Promise<
   Run<IState>
 > {
+  const hasAnyDeferredTools = agents.some((agent) => agent.hasDeferredTools === true);
+
+  const discoveredTools =
+    hasAnyDeferredTools && messages?.length
+      ? extractDiscoveredToolsFromHistory(messages)
+      : new Set<string>();
+
   const agentInputs: AgentInputs[] = [];
   const buildAgentContext = (agent: RunAgent) => {
     const provider =
       (providerEndpointMap[
         agent.provider as keyof typeof providerEndpointMap
       ] as unknown as Providers) ?? agent.provider;
+    const selfModel = agent.model_parameters?.model ?? (agent.model as string | undefined);
+
+    const summarization = shapeSummarizationConfig(
+      agent.summarization ?? summarizationConfig,
+      provider as string,
+      selfModel,
+    );
 
     const llmConfig: t.RunLLMConfig = Object.assign(
       {
@@ -113,12 +257,6 @@ export async function createRun({
       .join('\n')
       .trim();
 
-    /**
-     * Resolve request-based headers for Custom Endpoints. Note: if this is added to
-     *  non-custom endpoints, needs consideration of varying provider header configs.
-     *  This is done at this step because the request body may contain dynamic values
-     *  that need to be resolved after agent initialization.
-     */
     if (llmConfig?.configuration?.defaultHeaders != null) {
       llmConfig.configuration.defaultHeaders = resolveHeaders({
         headers: llmConfig.configuration.defaultHeaders as Record<string, string>,
@@ -127,7 +265,6 @@ export async function createRun({
       });
     }
 
-    /** Resolves issues with new OpenAI usage field */
     if (
       customProviders.has(agent.provider) ||
       (agent.provider === Providers.OPENAI && agent.endpoint !== agent.provider)
@@ -136,79 +273,58 @@ export async function createRun({
       llmConfig.usage = true;
     }
 
+    let toolDefinitions = agent.toolDefinitions ?? [];
+    if (discoveredTools.size > 0 && agent.toolRegistry) {
+      overrideDeferLoadingForDiscoveredTools(agent.toolRegistry, discoveredTools);
+
+      const existingToolNames = new Set(toolDefinitions.map((d) => d.name));
+      for (const toolName of discoveredTools) {
+        if (existingToolNames.has(toolName)) {
+          continue;
+        }
+        const toolDef = agent.toolRegistry.get(toolName);
+        if (toolDef) {
+          toolDefinitions = [...toolDefinitions, toolDef];
+        }
+      }
+    }
+
+    const effectiveMaxContextTokens = computeEffectiveMaxContextTokens(
+      summarization.reserveRatio,
+      agent.baseContextTokens,
+      agent.maxContextTokens,
+    );
+
     const reasoningKey = getReasoningKey(provider, llmConfig, agent.endpoint);
     const agentInput: AgentInputs = {
       provider,
       reasoningKey,
+      toolDefinitions,
       agentId: agent.id,
       tools: agent.tools,
       clientOptions: llmConfig,
       instructions: systemContent,
-      maxContextTokens: agent.maxContextTokens,
+      name: agent.name ?? undefined,
+      toolRegistry: agent.toolRegistry,
+      maxContextTokens: effectiveMaxContextTokens,
       useLegacyContent: agent.useLegacyContent ?? false,
+      discoveredTools: discoveredTools.size > 0 ? Array.from(discoveredTools) : undefined,
+      summarizationEnabled: summarization.enabled,
+      summarizationConfig: summarization.config,
+      initialSummary,
+      contextPruningConfig: summarization.contextPruning,
+      maxToolResultChars: agent.maxToolResultChars,
     };
     agentInputs.push(agentInput);
-    
-    // 详细记录agent input（特别是包含speckit工具的情况）
-    const hasSpeckitTool = agent.tools?.some(tool => 
-      (typeof tool === 'string' && tool === 'speckit') ||
-      (tool && typeof tool === 'object' && 'name' in tool && tool.name === 'speckit')
+
+    const hasSpeckitTool = agent.tools?.some(
+      (tool) =>
+        (typeof tool === 'string' && tool === 'speckit') ||
+        (tool && typeof tool === 'object' && 'name' in tool && tool.name === 'speckit'),
     );
-    
+
     if (hasSpeckitTool || agentInputs.length === 1) {
-      logger.info(`[Agent-Run] ========== Agent Input #${agentInputs.length} ==========`);
-      
-      // 记录工具信息
-      const toolsInfo = agent.tools?.map((tool, index) => {
-        if (typeof tool === 'string') {
-          return { index, type: 'string_reference', name: tool };
-        }
-        if (tool && typeof tool === 'object') {
-          return {
-            index,
-            type: 'object',
-            name: 'name' in tool ? tool.name : 'unknown',
-            description: 'description' in tool ? (typeof tool.description === 'string' ? tool.description.substring(0, 200) : tool.description) : undefined,
-            schema: 'schema' in tool ? JSON.stringify(tool.schema, null, 2).substring(0, 1000) : undefined,
-          };
-        }
-        return { index, type: 'unknown', tool };
-      }) || [];
-      
-      const agentInputLog = {
-        agentId: agent.id,
-        agentName: 'name' in agent ? agent.name : undefined,
-        provider,
-        reasoningKey,
-        model: llmConfig?.model,
-        clientOptions: {
-          ...llmConfig,
-          // 移除敏感信息（如果存在）
-          ...('apiKey' in llmConfig && llmConfig.apiKey ? { apiKey: '[REDACTED]' } : {}),
-          configuration: llmConfig?.configuration ? {
-            ...llmConfig.configuration,
-            ...('apiKey' in llmConfig.configuration && llmConfig.configuration.apiKey ? { apiKey: '[REDACTED]' } : {}),
-          } : undefined,
-        },
-        tools: {
-          count: agent.tools?.length || 0,
-          tools: toolsInfo,
-          hasSpeckit: hasSpeckitTool,
-        },
-        instructions: {
-          systemMessage: systemMessage.substring(0, 500) + (systemMessage.length > 500 ? '...' : ''),
-          instructions: agent.instructions?.substring(0, 500) + (agent.instructions && agent.instructions.length > 500 ? '...' : ''),
-          additionalInstructions: agent.additional_instructions?.substring(0, 500) + (agent.additional_instructions && agent.additional_instructions.length > 500 ? '...' : ''),
-          combinedSystemContent: systemContent.substring(0, 1000) + (systemContent.length > 1000 ? '...' : ''),
-        },
-        maxContextTokens: agent.maxContextTokens,
-        useLegacyContent: agent.useLegacyContent ?? false,
-        toolContextMap: agent.toolContextMap ? Object.keys(agent.toolContextMap) : undefined,
-        edges: 'edges' in agent ? agent.edges : undefined,
-      };
-      
-      logger.info(`[Agent-Run] Agent Input详情: ${JSON.stringify(agentInputLog, null, 2)}`);
-      logger.info(`[Agent-Run] ========== Agent Input #${agentInputs.length} 记录完成 ==========`);
+      logger.info(`[Agent-Run] Agent Input #${agentInputs.length} agentId=${agent.id}`);
     }
   };
 
@@ -228,51 +344,12 @@ export async function createRun({
     (graphConfig as StandardGraphConfig).type = 'standard';
   }
 
-  // 记录完整的graphConfig（特别是包含speckit工具的情况）
-  const hasSpeckitInAnyAgent = agentInputs.some(input => 
-    input.tools?.some(tool => 
-      (typeof tool === 'string' && tool === 'speckit') ||
-      (tool && typeof tool === 'object' && 'name' in tool && tool.name === 'speckit')
-    )
-  );
-  
-  if (hasSpeckitInAnyAgent || agentInputs.length > 0) {
-    logger.info(`[Agent-Run] ========== Graph Config ==========`);
-    const graphConfigLog = {
-      runId,
-      type: (graphConfig as MultiAgentGraphConfig).type || (graphConfig as StandardGraphConfig).type,
-      agentCount: agentInputs.length,
-      agents: agentInputs.map((input, index) => ({
-        index: index + 1,
-        agentId: input.agentId,
-        provider: input.provider,
-        reasoningKey: input.reasoningKey,
-        toolsCount: input.tools?.length || 0,
-        tools: input.tools?.map(tool => 
-          typeof tool === 'string' ? tool : (tool && typeof tool === 'object' && 'name' in tool ? tool.name : 'unknown')
-        ),
-        hasSpeckit: input.tools?.some(tool => 
-          (typeof tool === 'string' && tool === 'speckit') ||
-          (tool && typeof tool === 'object' && 'name' in tool && tool.name === 'speckit')
-        ),
-        instructionsLength: input.instructions?.length || 0,
-        maxContextTokens: input.maxContextTokens,
-        useLegacyContent: input.useLegacyContent,
-      })),
-      edges: (graphConfig as MultiAgentGraphConfig).edges || undefined,
-      hasSignal: !!signal,
-      streaming,
-      streamUsage,
-    };
-    logger.info(`[Agent-Run] Graph Config详情: ${JSON.stringify(graphConfigLog, null, 2)}`);
-    logger.info(`[Agent-Run] ========== Graph Config 记录完成 ==========`);
-  }
-
   return Run.create({
     runId,
     graphConfig,
     tokenCounter,
     customHandlers,
     indexTokenCountMap,
+    calibrationRatio,
   });
 }

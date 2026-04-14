@@ -937,10 +937,24 @@ class BaseClient {
       return _messages;
     }
 
-    // Find the latest message with a 'summary' property
     for (let i = _messages.length - 1; i >= 0; i--) {
-      if (_messages[i]?.summary) {
-        this.previous_summary = _messages[i];
+      const msg = _messages[i];
+      if (!msg) {
+        continue;
+      }
+
+      const summaryBlock = BaseClient.findSummaryContentBlock(msg);
+      if (summaryBlock) {
+        this.previous_summary = {
+          ...msg,
+          summary: BaseClient.getSummaryText(summaryBlock),
+          summaryTokenCount: summaryBlock.tokenCount,
+        };
+        break;
+      }
+
+      if (msg.summary) {
+        this.previous_summary = msg;
         break;
       }
     }
@@ -1030,6 +1044,34 @@ class BaseClient {
     await updateMessage(this.options.req, message);
   }
 
+  /** @param {{ content?: unknown; text?: string }} summaryBlock */
+  static getSummaryText(summaryBlock) {
+    if (Array.isArray(summaryBlock.content)) {
+      return summaryBlock.content.map((b) => b.text ?? '').join('');
+    }
+    if (typeof summaryBlock.content === 'string') {
+      return summaryBlock.content;
+    }
+    return summaryBlock.text ?? '';
+  }
+
+  /** @param {import('@because/data-provider').TMessage} message */
+  static findSummaryContentBlock(message) {
+    if (!Array.isArray(message?.content)) {
+      return null;
+    }
+    let lastSummary = null;
+    for (const part of message.content) {
+      if (
+        part?.type === ContentTypes.SUMMARY &&
+        BaseClient.getSummaryText(part).trim().length > 0
+      ) {
+        lastSummary = part;
+      }
+    }
+    return lastSummary;
+  }
+
   /**
    * Iterate through messages, building an array based on the parentMessageId.
    *
@@ -1057,6 +1099,7 @@ class BaseClient {
     messages,
     parentMessageId,
     mapMethod = null,
+    mapCondition = null,
     summary = false,
   }) {
     if (!messages || messages.length === 0) {
@@ -1082,18 +1125,35 @@ class BaseClient {
         break;
       }
 
-      if (summary && message.summary) {
-        message.role = 'system';
-        message.text = message.summary;
+      let resolved = message;
+      let hasSummary = false;
+      if (summary) {
+        const summaryBlock = BaseClient.findSummaryContentBlock(message);
+        if (summaryBlock) {
+          const summaryText = BaseClient.getSummaryText(summaryBlock);
+          resolved = {
+            ...message,
+            role: 'system',
+            content: [{ type: ContentTypes.TEXT, text: summaryText }],
+            tokenCount: summaryBlock.tokenCount,
+          };
+          hasSummary = true;
+        } else if (message.summary) {
+          resolved = {
+            ...message,
+            role: 'system',
+            content: [{ type: ContentTypes.TEXT, text: message.summary }],
+            tokenCount: message.summaryTokenCount ?? message.tokenCount,
+          };
+          hasSummary = true;
+        }
       }
 
-      if (summary && message.summaryTokenCount) {
-        message.tokenCount = message.summaryTokenCount;
-      }
+      const shouldMap = mapMethod != null && (mapCondition != null ? mapCondition(resolved) : true);
+      const processedMessage = shouldMap ? mapMethod(resolved) : resolved;
+      orderedMessages.push(processedMessage);
 
-      orderedMessages.push(message);
-
-      if (summary && message.summary) {
+      if (hasSummary) {
         break;
       }
 
@@ -1102,11 +1162,6 @@ class BaseClient {
     }
 
     orderedMessages.reverse();
-
-    if (mapMethod) {
-      return orderedMessages.map(mapMethod);
-    }
-
     return orderedMessages;
   }
 

@@ -16,6 +16,9 @@ export * from './tools/ToolSearchRegex';
 export * from './tools/handlers';
 export * from './tools/search';
 
+/* Summarization */
+export * from './summarization';
+
 /* Misc. */
 export * from './common';
 export * from './utils';

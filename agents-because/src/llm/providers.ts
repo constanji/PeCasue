@@ -31,6 +31,7 @@ export const llmProviders: Partial<ChatModelConstructorMap> = {
   [Providers.BEDROCK]: CustomChatBedrockConverse,
   // [Providers.ANTHROPIC]: ChatAnthropic,
   [Providers.GOOGLE]: CustomChatGoogleGenerativeAI,
+  [Providers.MOONSHOT]: ChatOpenAI,
 };
 
 export const manualToolStreamProviders = new Set<Providers | string>([
@@ -38,7 +39,7 @@ export const manualToolStreamProviders = new Set<Providers | string>([
   Providers.BEDROCK,
 ]);
 
-export const getChatModelClass = <P extends Providers>(
+export const getChatModelClass = <P extends keyof ProviderOptionsMap>(
   provider: P
 ): new (config: ProviderOptionsMap[P]) => ChatModelMap[P] => {
   const ChatModelClass = llmProviders[provider];

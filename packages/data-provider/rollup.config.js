@@ -1,4 +1,4 @@
-import typescript from 'rollup-plugin-typescript2';
+import typescript from '@rollup/plugin-typescript';
 import resolve from '@rollup/plugin-node-resolve';
 import pkg from './package.json';
 import peerDepsExternal from 'rollup-plugin-peer-deps-external';
@@ -8,29 +8,22 @@ import terser from '@rollup/plugin-terser';
 
 const plugins = [
   peerDepsExternal(),
-  resolve(),
+  resolve({
+    extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
+  }),
   replace({
     __IS_DEV__: process.env.NODE_ENV === 'development',
   }),
-  commonjs(),
   typescript({
     tsconfig: './tsconfig.json',
-    useTsconfigDeclarationDir: true,
-    /**
-     * Skip type checking to reduce memory usage when processing large dependencies
-     * Types are validated at compile time, this only affects rollup bundling
-     */
-    check: false,
-    /**
-     * Exclude node_modules from processing to reduce memory footprint
-     * Prevents loading type declarations from dependencies like @because/agents
-     */
+    compilerOptions: {
+      // Allow Rollup + plugin to emit; root tsconfig has noEmit: true for IDE-only checks
+      noEmit: false,
+      importHelpers: true,
+    },
     exclude: ['node_modules/**'],
-    /**
-     * Use cache for faster incremental builds
-     */
-    cacheRoot: './node_modules/.cache/rpt2_cache',
   }),
+  commonjs(),
   terser(),
 ];
 

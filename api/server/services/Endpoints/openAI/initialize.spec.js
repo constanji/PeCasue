@@ -8,17 +8,60 @@ jest.mock('~/cache/getLogStores', () => ({
   }),
 }));
 
+/** Real OpenAIClient pulls @because/data-schemas logger and breaks Jest; keep a minimal constructor for options assertions. */
+jest.mock('~/app/clients/OpenAIClient', () =>
+  function OpenAIClient(apiKey, options) {
+    this.apiKey = apiKey;
+    this.options = options;
+  },
+);
+
 const { EModelEndpoint, ErrorTypes, validateAzureGroups } = require('@because/data-provider');
+
+// Avoid loading the full `@because/api` barrel (pulls in packages that initialize @because/data-schemas winston).
+jest.mock('@because/api', () => ({
+  isEnabled: (value) =>
+    value === true || (typeof value === 'string' && value.toLowerCase().trim() === 'true'),
+  isUserProvided: (value) => value === 'user_provided',
+  resolveHeaders: ({ headers }) => headers ?? {},
+  getOpenAIConfig: jest.fn(() => ({
+    llmConfig: { model: 'gpt-4', streaming: true },
+    configOptions: {},
+    tools: [],
+  })),
+  getAzureCredentials: jest.fn(() => ({
+    azureOpenAIApiKey: process.env.AZURE_API_KEY ?? 'azure-key',
+    azureOpenAIApiInstanceName: process.env.AZURE_OPENAI_API_INSTANCE_NAME ?? 'instance',
+    azureOpenAIApiDeploymentName: process.env.AZURE_OPENAI_API_DEPLOYMENT_NAME ?? 'deployment',
+    azureOpenAIApiVersion: process.env.AZURE_OPENAI_API_VERSION ?? '2023-12-01-preview',
+  })),
+}));
+
 const { getUserKey, getUserKeyValues } = require('~/server/services/UserService');
 const initializeClient = require('./initialize');
-const { OpenAIClient } = require('~/app');
+const OpenAIClient = require('~/app/clients/OpenAIClient');
 
-// Mock getUserKey since it's the only function we want to mock
-jest.mock('~/server/services/UserService', () => ({
-  getUserKey: jest.fn(),
-  getUserKeyValues: jest.fn(),
-  checkUserKeyExpiry: jest.requireActual('~/server/services/UserService').checkUserKeyExpiry,
-}));
+// Mock UserService without requireActual — loading the real module pulls in @because/data-schemas
+// logger/winston and breaks Jest (see winston redactFormat pipeline).
+jest.mock('~/server/services/UserService', () => {
+  const { ErrorTypes: ET } = require('@because/data-provider');
+  return {
+    getUserKey: jest.fn(),
+    getUserKeyValues: jest.fn(),
+    checkUserKeyExpiry: (expiresAt, endpoint) => {
+      const expiresAtDate = new Date(expiresAt);
+      if (expiresAtDate < new Date()) {
+        throw new Error(
+          JSON.stringify({
+            type: ET.EXPIRED_USER_KEY,
+            expiredAt: expiresAtDate.toLocaleString(),
+            endpoint,
+          }),
+        );
+      }
+    },
+  };
+});
 
 const mockAppConfig = {
   endpoints: {
@@ -199,7 +242,7 @@ describe('initializeClient', () => {
     expect(client.client.options.debug).toBe(true);
   });
 
-  test('should set contextStrategy to summarize when OPENAI_SUMMARIZE is enabled', async () => {
+  test('should not use env-based summarize; contextStrategy stays null', async () => {
     process.env.OPENAI_API_KEY = 'test-openai-api-key';
     process.env.OPENAI_SUMMARIZE = 'true';
 
@@ -214,7 +257,7 @@ describe('initializeClient', () => {
 
     const client = await initializeClient({ req, res, endpointOption });
 
-    expect(client.client.options.contextStrategy).toBe('summarize');
+    expect(client.client.options.contextStrategy).toBe(null);
   });
 
   test('should set reverseProxyUrl and proxy when they are provided in the environment', async () => {
@@ -383,7 +426,6 @@ describe('initializeClient', () => {
 
   test('should initialize client with default options when certain env vars are not set', async () => {
     delete process.env.DEBUG_OPENAI;
-    delete process.env.OPENAI_SUMMARIZE;
     process.env.OPENAI_API_KEY = 'some-api-key';
 
     const req = {

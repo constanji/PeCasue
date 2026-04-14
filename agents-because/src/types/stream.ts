@@ -10,6 +10,7 @@ import type { ToolCall, ToolCallChunk } from '@langchain/core/messages/tool';
 import type { LLMResult, Generation } from '@langchain/core/outputs';
 import type { AnthropicContentBlock } from '@/llm/anthropic/types';
 import type { Command } from '@langchain/langgraph';
+import type { SummarizeCompleteEvent } from '@/types/summarize';
 import type { ToolEndEvent } from '@/types/tools';
 import { StepTypes, ContentTypes, GraphEvents } from '@/common/enum';
 
@@ -66,9 +67,21 @@ export type RunStep = {
   id: string; // #new
   runId?: string; // #new
   agentId?: string; // #new - tracks which agent this step belongs to
+  /**
+   * Group ID - incrementing number (1, 2, 3...) reflecting execution order.
+   * Agents with the same groupId run in parallel and should be rendered together.
+   * undefined means the agent runs sequentially (not part of any parallel group).
+   *
+   * Example for: researcher -> [analyst1, analyst2, analyst3] -> summarizer
+   * - researcher: undefined (sequential)
+   * - analyst1, analyst2, analyst3: 1 (first parallel group)
+   * - summarizer: undefined (sequential)
+   */
+  groupId?: number; // #new
   index: number; // #new
   stepIndex?: number; // #new
   stepDetails: StepDetails;
+  summary?: SummaryContentBlock;
   usage?: null | object;
   // {
   // Define usage structure if it's ever non-null
@@ -95,7 +108,12 @@ export interface RunStepDeltaEvent {
 
 export type StepDetails = MessageCreationDetails | ToolCallsDetails;
 
-export type StepCompleted = ToolCallCompleted;
+export type SummaryCompleted = {
+  type: 'summary';
+  summary: SummaryContentBlock;
+};
+
+export type StepCompleted = ToolCallCompleted | SummaryCompleted;
 
 export type MessageCreationDetails = {
   type: StepTypes.MESSAGE_CREATION;
@@ -153,6 +171,9 @@ export type ToolCallsDetails = {
 export type ToolCallDelta = {
   type: StepTypes;
   tool_calls?: ToolCallChunk[]; // #new
+  summary?: SummaryContentBlock;
+  auth?: string;
+  expires_at?: number;
 };
 
 export type AgentToolCall =
@@ -247,11 +268,33 @@ export type MessageDeltaUpdate = {
 };
 export type ReasoningDeltaUpdate = { type: ContentTypes.THINK; think: string };
 
-export type ContentType = 'text' | 'image_url' | 'tool_call' | 'think' | string;
+export type ContentType =
+  | 'text'
+  | 'image_url'
+  | 'tool_call'
+  | 'think'
+  | 'summary'
+  | string;
 
 export type ReasoningContentText = {
   type: ContentTypes.THINK;
   think: string;
+};
+
+export type SummaryBoundary = {
+  messageId: string;
+  contentIndex: number;
+};
+
+export type SummaryContentBlock = {
+  type: ContentTypes.SUMMARY;
+  content?: MessageContentComplex[];
+  tokenCount?: number;
+  boundary?: SummaryBoundary;
+  summaryVersion?: number;
+  model?: string;
+  provider?: string;
+  createdAt?: string;
 };
 
 /** Vertex AI / Google Common - Reasoning Content Block Format */
@@ -317,6 +360,7 @@ export type ToolResultContent = {
 export type MessageContentComplex = (
   | ToolResultContent
   | ThinkingContentText
+  | SummaryContentBlock
   | AgentUpdate
   | ToolCallContent
   | ReasoningContentText
@@ -332,6 +376,10 @@ export type MessageContentComplex = (
     })
 ) & {
   tool_call_ids?: string[];
+  // Optional agentId for parallel execution attribution
+  agentId?: string;
+  // Optional groupId for parallel group attribution
+  groupId?: number;
 };
 
 export interface TMessage {
@@ -382,6 +430,13 @@ export type SplitStreamHandlers = Partial<{
   }) => void;
 }>;
 
+export type SummarizeDeltaData = {
+  id: string;
+  delta: {
+    summary: SummaryContentBlock;
+  };
+};
+
 export type ContentAggregator = ({
   event,
   data,
@@ -389,11 +444,13 @@ export type ContentAggregator = ({
   event: GraphEvents;
   data:
     | RunStep
+    | AgentUpdate
     | MessageDeltaEvent
+    | ReasoningDeltaEvent
     | RunStepDeltaEvent
-    | {
-        result: ToolEndEvent;
-      };
+    | SummarizeDeltaData
+    | SummarizeCompleteEvent
+    | { result: ToolEndEvent };
 }) => void;
 export type ContentAggregatorResult = {
   stepMap: Map<string, RunStep | undefined>;

@@ -8,7 +8,7 @@ import {
   ReasoningSummary,
   BedrockProviders,
   anthropicSettings,
-} from './types';
+} from './global-types';
 import { SettingDefinition, SettingsConfiguration } from './generate';
 
 // Base definitions

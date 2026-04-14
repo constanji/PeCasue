@@ -1,7 +1,7 @@
 import type { OpenAPIV3 } from 'openapi-types';
 import type { AssistantsEndpoint, AgentProvider } from 'src/schemas';
 import type { Agents, GraphEdge } from './agents';
-import type { ContentTypes } from './runs';
+import { ContentTypes } from './runs';
 import type { TFile } from './files';
 import { ArtifactModes } from 'src/artifacts';
 
@@ -484,6 +484,23 @@ export type ContentPart = (
 
 export type TextData = (Text & PartMetadata) | undefined;
 
+/** Inline conversation summary block (context compaction / checkpoint). */
+export type SummaryContentPart = {
+  type: ContentTypes.SUMMARY;
+  text?: string;
+  content?: Array<{ type: ContentTypes.TEXT; text: string }>;
+  tokenCount?: number;
+  summarizing?: boolean;
+  summaryVersion?: number;
+  model?: string;
+  provider?: string;
+  createdAt?: string;
+  boundary?: {
+    messageId: string;
+    contentIndex: number;
+  };
+};
+
 export type TMessageContentParts =
   | {
       type: ContentTypes.ERROR;
@@ -508,6 +525,7 @@ export type TMessageContentParts =
         PartMetadata;
     }
   | { type: ContentTypes.IMAGE_FILE; image_file: ImageFile & PartMetadata }
+  | SummaryContentPart
   | Agents.AgentUpdate
   | Agents.MessageContentImageUrl;
 

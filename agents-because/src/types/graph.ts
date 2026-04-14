@@ -23,6 +23,13 @@ import type { Providers, Callback, GraphNodeKeys } from '@/common';
 import type { StandardGraph, MultiAgentGraph } from '@/graphs';
 import type { ClientOptions } from '@/types/llm';
 import type {
+  SummarizationNodeInput,
+  SummarizeCompleteEvent,
+  SummarizationConfig,
+  SummarizeStartEvent,
+  SummarizeDeltaEvent,
+} from '@/types/summarize';
+import type {
   RunStep,
   RunStepDeltaEvent,
   MessageDeltaEvent,
@@ -66,11 +73,24 @@ export type BaseGraphState = {
   messages: BaseMessage[];
 };
 
+export type AgentSubgraphState = BaseGraphState & {
+  summarizationRequest?: SummarizationNodeInput;
+};
+
 export type MultiAgentGraphState = BaseGraphState & {
   agentMessages?: BaseMessage[];
 };
 
 export type IState = BaseGraphState;
+
+export interface AgentLogEvent {
+  level: 'debug' | 'info' | 'warn' | 'error';
+  scope: 'prune' | 'summarize' | 'graph' | 'sanitize' | (string & {});
+  message: string;
+  data?: Record<string, unknown>;
+  runId?: string;
+  agentId?: string;
+}
 
 export interface EventHandler {
   handle(
@@ -82,6 +102,10 @@ export interface EventHandler {
       | RunStepDeltaEvent
       | MessageDeltaEvent
       | ReasoningDeltaEvent
+      | SummarizeStartEvent
+      | SummarizeDeltaEvent
+      | SummarizeCompleteEvent
+      | AgentLogEvent
       | { result: ToolEndEvent },
     metadata?: Record<string, unknown>,
     graph?: StandardGraph | MultiAgentGraph
@@ -142,24 +166,30 @@ export type CompiledMultiAgentWorkflow = CompiledStateGraph<
 >;
 
 export type CompiledAgentWorfklow = CompiledStateGraph<
-  {
-    messages: BaseMessage[];
-  },
-  {
-    messages?: BaseMessage[] | undefined;
-  },
-  '__start__' | `agent=${string}` | `tools=${string}`,
+  AgentSubgraphState,
+  Partial<AgentSubgraphState>,
+  '__start__' | `agent=${string}` | `tools=${string}` | `summarize=${string}`,
   {
     messages: BinaryOperatorAggregate<BaseMessage[], BaseMessage[]>;
+    summarizationRequest: BinaryOperatorAggregate<
+      SummarizationNodeInput | undefined,
+      SummarizationNodeInput | undefined
+    >;
   },
   {
     messages: BinaryOperatorAggregate<BaseMessage[], BaseMessage[]>;
+    summarizationRequest: BinaryOperatorAggregate<
+      SummarizationNodeInput | undefined,
+      SummarizationNodeInput | undefined
+    >;
   },
   StateDefinition,
   {
     [x: `agent=${string}`]: Partial<BaseGraphState>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     [x: `tools=${string}`]: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    [x: `summarize=${string}`]: any;
   }
 >;
 
@@ -300,6 +330,8 @@ export type PartMetadata = {
   status?: string;
   action?: boolean;
   output?: string;
+  auth?: string;
+  expires_at?: number;
 };
 
 export type ModelEndData =
@@ -312,6 +344,7 @@ export type StandardGraphInput = {
   agents: AgentInputs[];
   tokenCounter?: TokenCounter;
   indexTokenCountMap?: Record<string, number>;
+  calibrationRatio?: number;
 };
 
 export type GraphEdge = {
@@ -357,6 +390,8 @@ export type MultiAgentGraphInput = StandardGraphInput & {
 
 export interface AgentInputs {
   agentId: string;
+  /** Human-readable name for the agent (used in handoff context). Defaults to agentId if not provided. */
+  name?: string;
   toolEnd?: boolean;
   toolMap?: ToolMap;
   tools?: GraphTools;
@@ -375,4 +410,42 @@ export interface AgentInputs {
    * Maps tool name to LCTool definition.
    */
   toolRegistry?: Map<string, LCTool>;
+  /**
+   * Serializable tool definitions for event-driven execution.
+   * When provided, ToolNode operates in event-driven mode, dispatching
+   * ON_TOOL_EXECUTE events instead of invoking tools directly.
+   */
+  toolDefinitions?: LCTool[];
+  /**
+   * Tool names discovered from previous conversation history.
+   * These tools will be pre-marked as discovered so they're included
+   * in tool binding without requiring tool_search.
+   */
+  discoveredTools?: string[];
+  summarizationEnabled?: boolean;
+  summarizationConfig?: SummarizationConfig;
+  /** Cross-run summary from a previous run, forwarded from formatAgentMessages.
+   *  Injected into the system message via AgentContext.buildInstructionsString(). */
+  initialSummary?: { text: string; tokenCount: number };
+  contextPruningConfig?: ContextPruningConfig;
+  maxToolResultChars?: number;
+  /** Pre-computed tool schema token count (from cache). Skips recalculation when provided. */
+  toolSchemaTokens?: number;
+}
+
+export interface ContextPruningConfig {
+  enabled?: boolean;
+  keepLastAssistants?: number;
+  softTrimRatio?: number;
+  hardClearRatio?: number;
+  minPrunableToolChars?: number;
+  softTrim?: {
+    maxChars?: number;
+    headChars?: number;
+    tailChars?: number;
+  };
+  hardClear?: {
+    enabled?: boolean;
+    placeholder?: string;
+  };
 }

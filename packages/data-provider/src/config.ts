@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { ZodError } from 'zod';
-import type { TEndpointsConfig, TModelsConfig, TConfig } from './types';
+import type { TEndpointsConfig, TModelsConfig, TConfig } from './global-types';
 import { EModelEndpoint, eModelEndpointSchema } from './schemas';
 import { specsConfigSchema, TSpecsConfig } from './models';
 import { fileConfigSchema } from './file-config';
@@ -311,8 +311,6 @@ export const endpointSchema = baseEndpointSchema.merge(
       fetch: z.boolean().optional(),
       userIdQuery: z.boolean().optional(),
     }),
-    summarize: z.boolean().optional(),
-    summaryModel: z.string().optional(),
     iconURL: z.string().optional(),
     forcePrompt: z.boolean().optional(),
     forceStringContent: z.boolean().optional(),
@@ -349,8 +347,6 @@ export const azureEndpointSchema = z
         titleModel: true,
         titlePrompt: true,
         titlePromptTemplate: true,
-        summarize: true,
-        summaryModel: true,
         customOrder: true,
       })
       .partial(),
@@ -819,6 +815,34 @@ export const memorySchema = z.object({
 
 export type TMemoryConfig = DeepPartial<z.infer<typeof memorySchema>>;
 
+export const summarizationTriggerSchema = z.object({
+  type: z.enum(['token_count', 'token_ratio', 'remaining_tokens', 'messages_to_refine']),
+  value: z.number().positive(),
+});
+
+export const contextPruningSchema = z.object({
+  enabled: z.boolean().optional(),
+  keepLastAssistants: z.number().min(0).max(10).optional(),
+  softTrimRatio: z.number().min(0).max(1).optional(),
+  hardClearRatio: z.number().min(0).max(1).optional(),
+  minPrunableToolChars: z.number().min(0).optional(),
+});
+
+export const summarizationConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  parameters: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  trigger: summarizationTriggerSchema.optional(),
+  prompt: z.string().optional(),
+  updatePrompt: z.string().optional(),
+  reserveRatio: z.number().min(0).max(1).optional(),
+  maxSummaryTokens: z.number().positive().optional(),
+  contextPruning: contextPruningSchema.optional(),
+});
+
+export type SummarizationConfig = z.infer<typeof summarizationConfigSchema>;
+
 export const qaExtractorSchema = z.object({
   disabled: z.boolean().optional(),
   messageWindowSize: z.number().optional().default(5),
@@ -851,6 +875,7 @@ export const configSchema = z.object({
   webSearch: webSearchSchema.optional(),
   memory: memorySchema.optional(),
   qaExtractor: qaExtractorSchema.optional(),
+  summarization: summarizationConfigSchema.optional(),
   secureImageLinks: z.boolean().optional(),
   imageOutputType: z.nativeEnum(EImageOutputType).default(EImageOutputType.PNG),
   includedTools: z.array(z.string()).optional(),

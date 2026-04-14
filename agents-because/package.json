@@ -88,6 +88,7 @@
     "start:dev": "node --loader ./tsconfig-paths-bootstrap.mjs --experimental-specifier-resolution=node ./src/main.ts",
     "supervised": "node -r dotenv/config --loader ./tsconfig-paths-bootstrap.mjs --experimental-specifier-resolution=node ./src/scripts/supervised.ts --provider anthropic --name Jo --location \"New York, NY\"",
     "test": "jest",
+    "test:summarization": "jest --testPathPatterns=summarization",
     "test:memory": "NODE_OPTIONS='--expose-gc' npx jest src/specs/title.memory-leak.test.ts",
     "test:all": "npm test -- --testPathIgnorePatterns=title.memory-leak.test.ts && npm run test:memory",
     "reinstall": "npm run clean && npm ci && rm -rf ./dist && npm run build",
@@ -117,13 +118,16 @@
     "@langfuse/otel": "^4.3.0",
     "@langfuse/tracing": "^4.3.0",
     "@opentelemetry/sdk-node": "^0.207.0",
+    "ai-tokenizer": "^1.0.0",
     "axios": "^1.12.1",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.7",
     "https-proxy-agent": "^7.0.6",
     "mathjs": "^15.1.0",
     "nanoid": "^3.3.7",
-    "openai": "5.8.2"
+    "openai": "5.8.2",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.24.1"
   },
   "imports": {
     "@/*": "./src/*",

@@ -1,7 +1,7 @@
-import { z } from 'zod';
 import { tool } from '@langchain/core/tools';
 import { PromptTemplate } from '@langchain/core/prompts';
 import {
+  AIMessage,
   ToolMessage,
   HumanMessage,
   getBufferString,
@@ -15,11 +15,15 @@ import {
   getCurrentTaskInput,
   messagesStateReducer,
 } from '@langchain/langgraph';
+import type { LangGraphRunnableConfig } from '@langchain/langgraph';
+import type { BaseMessage, AIMessageChunk } from '@langchain/core/messages';
 import type { ToolRunnableConfig } from '@langchain/core/tools';
-import type { BaseMessage } from '@langchain/core/messages';
 import type * as t from '@/types';
 import { StandardGraph } from './Graph';
 import { Constants } from '@/common';
+
+/** Pattern to extract instructions from transfer ToolMessage content */
+const HANDOFF_INSTRUCTIONS_PATTERN = /(?:Instructions?|Context):\s*(.+)/is;
 
 /**
  * MultiAgentGraph extends StandardGraph to support dynamic multi-agent workflows
@@ -40,6 +44,17 @@ export class MultiAgentGraph extends StandardGraph {
   private startingNodes: Set<string> = new Set();
   private directEdges: t.GraphEdge[] = [];
   private handoffEdges: t.GraphEdge[] = [];
+  /**
+   * Map of agentId to parallel group info.
+   * Contains groupId (incrementing number reflecting execution order) for agents in parallel groups.
+   * Sequential agents (not in any parallel group) have undefined entry.
+   *
+   * Example for: researcher -> [analyst1, analyst2, analyst3] -> summarizer
+   * - researcher: undefined (sequential, order 0)
+   * - analyst1, analyst2, analyst3: { groupId: 1 } (parallel group, order 1)
+   * - summarizer: undefined (sequential, order 2)
+   */
+  private agentParallelGroups: Map<string, number> = new Map();
 
   constructor(input: t.MultiAgentGraphInput) {
     super(input);
@@ -99,6 +114,114 @@ export class MultiAgentGraph extends StandardGraph {
     if (this.startingNodes.size === 0 && this.agentContexts.size > 0) {
       this.startingNodes.add(this.agentContexts.keys().next().value!);
     }
+
+    // Determine if graph has parallel execution capability
+    this.computeParallelCapability();
+  }
+
+  /**
+   * Compute parallel groups by traversing the graph in execution order.
+   * Assigns incrementing group IDs that reflect the sequential order of execution.
+   *
+   * For: researcher -> [analyst1, analyst2, analyst3] -> summarizer
+   * - researcher: no group (first sequential node)
+   * - analyst1, analyst2, analyst3: groupId 1 (first parallel group)
+   * - summarizer: no group (next sequential node)
+   *
+   * This allows frontend to render in order:
+   * Row 0: researcher
+   * Row 1: [analyst1, analyst2, analyst3] (grouped)
+   * Row 2: summarizer
+   */
+  private computeParallelCapability(): void {
+    let groupCounter = 1; // Start at 1, 0 reserved for "no group"
+
+    // Check 1: Multiple starting nodes means parallel from the start (group 1)
+    if (this.startingNodes.size > 1) {
+      for (const agentId of this.startingNodes) {
+        this.agentParallelGroups.set(agentId, groupCounter);
+      }
+      groupCounter++;
+    }
+
+    // Check 2: Traverse direct edges in order to find fan-out patterns
+    // Build a simple execution order by following edges from starting nodes
+    const visited = new Set<string>();
+    const queue: string[] = [...this.startingNodes];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      // Find direct edges from this node
+      for (const edge of this.directEdges) {
+        const sources = Array.isArray(edge.from) ? edge.from : [edge.from];
+        if (!sources.includes(current)) continue;
+
+        const destinations = Array.isArray(edge.to) ? edge.to : [edge.to];
+
+        // Fan-out: multiple destinations = parallel group
+        if (destinations.length > 1) {
+          for (const dest of destinations) {
+            // Only set if not already in a group (first group wins)
+            if (!this.agentParallelGroups.has(dest)) {
+              this.agentParallelGroups.set(dest, groupCounter);
+            }
+            if (!visited.has(dest)) {
+              queue.push(dest);
+            }
+          }
+          groupCounter++;
+        } else {
+          // Single destination - add to queue for traversal
+          for (const dest of destinations) {
+            if (!visited.has(dest)) {
+              queue.push(dest);
+            }
+          }
+        }
+      }
+
+      // Also follow handoff edges for traversal (but they don't create parallel groups)
+      for (const edge of this.handoffEdges) {
+        const sources = Array.isArray(edge.from) ? edge.from : [edge.from];
+        if (!sources.includes(current)) continue;
+
+        const destinations = Array.isArray(edge.to) ? edge.to : [edge.to];
+        for (const dest of destinations) {
+          if (!visited.has(dest)) {
+            queue.push(dest);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Get the parallel group ID for an agent, if any.
+   * Returns undefined if the agent is not part of a parallel group.
+   * Group IDs are incrementing numbers reflecting execution order.
+   */
+  getParallelGroupId(agentId: string): number | undefined {
+    return this.agentParallelGroups.get(agentId);
+  }
+
+  /**
+   * Override to indicate this is a multi-agent graph.
+   * Enables agentId to be included in RunStep for frontend agent labeling.
+   */
+  protected override isMultiAgentGraph(): boolean {
+    return true;
+  }
+
+  /**
+   * Override base class method to provide parallel group IDs for run steps.
+   */
+  protected override getParallelGroupIdForAgent(
+    agentId: string
+  ): number | undefined {
+    return this.agentParallelGroups.get(agentId);
   }
 
   /**
@@ -126,22 +249,31 @@ export class MultiAgentGraph extends StandardGraph {
 
       // Create handoff tools for this agent's outgoing edges
       const handoffTools: t.GenericTool[] = [];
+      const sourceAgentName = agentContext.name ?? agentId;
       for (const edge of edges) {
-        handoffTools.push(...this.createHandoffToolsForEdge(edge));
+        handoffTools.push(
+          ...this.createHandoffToolsForEdge(edge, agentId, sourceAgentName)
+        );
       }
 
-      // Add handoff tools to the agent's existing tools
-      if (!agentContext.tools) {
-        agentContext.tools = [];
+      if (!agentContext.graphTools) {
+        agentContext.graphTools = [];
       }
-      agentContext.tools.push(...handoffTools);
+      agentContext.graphTools.push(...handoffTools);
     }
   }
 
   /**
    * Create handoff tools for an edge (handles multiple destinations)
+   * @param edge - The graph edge defining the handoff
+   * @param sourceAgentId - The ID of the agent that will perform the handoff
+   * @param sourceAgentName - The human-readable name of the source agent
    */
-  private createHandoffToolsForEdge(edge: t.GraphEdge): t.GenericTool[] {
+  private createHandoffToolsForEdge(
+    edge: t.GraphEdge,
+    sourceAgentId: string,
+    sourceAgentName: string
+  ): t.GenericTool[] {
     const tools: t.GenericTool[] = [];
     const destinations = Array.isArray(edge.to) ? edge.to : [edge.to];
 
@@ -159,7 +291,8 @@ export class MultiAgentGraph extends StandardGraph {
 
       tools.push(
         tool(
-          async (input: Record<string, unknown>, config) => {
+          async (rawInput, config) => {
+            const input = rawInput as Record<string, unknown>;
             const state = getCurrentTaskInput() as t.BaseGraphState;
             const toolCallId =
               (config as ToolRunnableConfig | undefined)?.toolCall?.id ??
@@ -193,6 +326,12 @@ export class MultiAgentGraph extends StandardGraph {
               content,
               name: toolName,
               tool_call_id: toolCallId,
+              additional_kwargs: {
+                /** Store destination for programmatic access in handoff detection */
+                handoff_destination: destination,
+                /** Store source agent name for receiving agent to know who handed off */
+                handoff_source_name: sourceAgentName,
+              },
             });
 
             return new Command({
@@ -204,13 +343,17 @@ export class MultiAgentGraph extends StandardGraph {
           {
             name: toolName,
             schema: hasHandoffInput
-              ? z.object({
-                [promptKey]: z
-                  .string()
-                  .optional()
-                  .describe(handoffInputDescription as string),
-              })
-              : z.object({}),
+              ? {
+                type: 'object',
+                properties: {
+                  [promptKey]: {
+                    type: 'string',
+                    description: handoffInputDescription as string,
+                  },
+                },
+                required: [],
+              }
+              : { type: 'object', properties: {}, required: [] },
             description: toolDescription,
           }
         )
@@ -232,7 +375,8 @@ export class MultiAgentGraph extends StandardGraph {
 
         tools.push(
           tool(
-            async (input: Record<string, unknown>, config) => {
+            async (rawInput, config) => {
+              const input = rawInput as Record<string, unknown>;
               const toolCallId =
                 (config as ToolRunnableConfig | undefined)?.toolCall?.id ??
                 'unknown';
@@ -250,26 +394,98 @@ export class MultiAgentGraph extends StandardGraph {
                 content,
                 name: toolName,
                 tool_call_id: toolCallId,
+                additional_kwargs: {
+                  /** Store source agent name for receiving agent to know who handed off */
+                  handoff_source_name: sourceAgentName,
+                },
               });
 
               const state = getCurrentTaskInput() as t.BaseGraphState;
 
+              /**
+               * For parallel handoff support:
+               * Build messages that include ONLY this tool call's context.
+               * This prevents errors when LLM calls multiple transfers simultaneously -
+               * each destination gets a valid AIMessage with matching tool_call and tool_result.
+               *
+               * Strategy:
+               * 1. Find the AIMessage containing this tool call
+               * 2. Create a filtered AIMessage with ONLY this tool_call
+               * 3. Include all messages before the AIMessage plus the filtered pair
+               */
+              const messages = state.messages;
+              let filteredMessages = messages;
+              let aiMessageIndex = -1;
+
+              /** Find the AIMessage containing this tool call */
+              for (let i = messages.length - 1; i >= 0; i--) {
+                const msg = messages[i];
+                if (msg.getType() === 'ai') {
+                  const aiMsg = msg as AIMessage;
+                  const hasThisCall = aiMsg.tool_calls?.some(
+                    (tc) => tc.id === toolCallId
+                  );
+                  if (hasThisCall === true) {
+                    aiMessageIndex = i;
+                    break;
+                  }
+                }
+              }
+
+              if (aiMessageIndex >= 0) {
+                const originalAiMsg = messages[aiMessageIndex] as AIMessage;
+                const thisToolCall = originalAiMsg.tool_calls?.find(
+                  (tc) => tc.id === toolCallId
+                );
+
+                if (
+                  thisToolCall != null &&
+                  (originalAiMsg.tool_calls?.length ?? 0) > 1
+                ) {
+                  /**
+                   * Multiple tool calls - create filtered AIMessage with ONLY this call.
+                   * This ensures valid message structure for parallel handoffs.
+                   */
+                  const filteredAiMsg = new AIMessage({
+                    content: originalAiMsg.content,
+                    tool_calls: [thisToolCall],
+                    id: originalAiMsg.id,
+                  });
+
+                  filteredMessages = [
+                    ...messages.slice(0, aiMessageIndex),
+                    filteredAiMsg,
+                    toolMessage,
+                  ];
+                } else {
+                  /** Single tool call - use messages as-is */
+                  filteredMessages = messages.concat(toolMessage);
+                }
+              } else {
+                /** Fallback - append tool message */
+                filteredMessages = messages.concat(toolMessage);
+              }
+
               return new Command({
                 goto: destination,
-                update: { messages: state.messages.concat(toolMessage) },
+                update: { messages: filteredMessages },
                 graph: Command.PARENT,
               });
             },
             {
               name: toolName,
               schema: hasHandoffInput
-                ? z.object({
-                  [promptKey]: z
-                    .string()
-                    .optional()
-                    .describe(handoffInputDescription as string),
-                })
-                : z.object({}),
+                ? {
+                  type: 'object',
+                  properties: {
+                    [promptKey]: {
+                      type: 'string',
+                      description: handoffInputDescription as string,
+                    },
+                  },
+                  required: [],
+                }
+                : { type: 'object', properties: {}, required: [] },
               description: toolDescription,
             }
           )
@@ -286,6 +502,179 @@ export class MultiAgentGraph extends StandardGraph {
   private createAgentSubgraph(agentId: string): t.CompiledAgentWorfklow {
     /** This is essentially the same as `createAgentNode` from `StandardGraph` */
     return this.createAgentNode(agentId);
+  }
+
+  /**
+   * Detects if the current agent is receiving a handoff and processes the messages accordingly.
+   * Returns filtered messages with the transfer tool call/message removed, plus any instructions,
+   * source agent, and parallel sibling information extracted from the transfer.
+   *
+   * Supports both single handoffs (last message is the transfer) and parallel handoffs
+   * (multiple transfer ToolMessages, need to find the one targeting this agent).
+   *
+   * @param messages - Current state messages
+   * @param agentId - The agent ID to check for handoff reception
+   * @returns Object with filtered messages, extracted instructions, source agent, and parallel siblings
+   */
+  private processHandoffReception(
+    messages: BaseMessage[],
+    agentId: string
+  ): {
+    filteredMessages: BaseMessage[];
+    instructions: string | null;
+    sourceAgentName: string | null;
+    parallelSiblings: string[];
+  } | null {
+    if (messages.length === 0) return null;
+
+    /**
+     * Search for a transfer ToolMessage targeting this agent.
+     * For parallel handoffs, multiple transfer messages may exist - find ours.
+     * Search backwards from the end to find the most recent transfer to this agent.
+     */
+    let toolMessage: ToolMessage | null = null;
+    let toolMessageIndex = -1;
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.getType() !== 'tool') continue;
+
+      const candidateMsg = msg as ToolMessage;
+      const toolName = candidateMsg.name;
+
+      if (typeof toolName !== 'string') continue;
+
+      /** Check for standard transfer pattern */
+      const isTransferMessage = toolName.startsWith(Constants.LC_TRANSFER_TO_);
+      const isConditionalTransfer = toolName === 'conditional_transfer';
+
+      if (!isTransferMessage && !isConditionalTransfer) continue;
+
+      /** Extract destination from tool name or additional_kwargs */
+      let destinationAgent: string | null = null;
+
+      if (isTransferMessage) {
+        destinationAgent = toolName.replace(Constants.LC_TRANSFER_TO_, '');
+      } else if (isConditionalTransfer) {
+        const handoffDest = candidateMsg.additional_kwargs.handoff_destination;
+        destinationAgent = typeof handoffDest === 'string' ? handoffDest : null;
+      }
+
+      /** Check if this transfer targets our agent */
+      if (destinationAgent === agentId) {
+        toolMessage = candidateMsg;
+        toolMessageIndex = i;
+        break;
+      }
+    }
+
+    /** No transfer targeting this agent found */
+    if (toolMessage === null || toolMessageIndex < 0) return null;
+
+    /** Extract instructions from the ToolMessage content */
+    const contentStr =
+      typeof toolMessage.content === 'string'
+        ? toolMessage.content
+        : JSON.stringify(toolMessage.content);
+
+    const instructionsMatch = contentStr.match(HANDOFF_INSTRUCTIONS_PATTERN);
+    const instructions = instructionsMatch?.[1]?.trim() ?? null;
+
+    /** Extract source agent name from additional_kwargs */
+    const handoffSourceName = toolMessage.additional_kwargs.handoff_source_name;
+    const sourceAgentName =
+      typeof handoffSourceName === 'string' ? handoffSourceName : null;
+
+    /** Extract parallel siblings (set by ToolNode for parallel handoffs) */
+    const rawSiblings = toolMessage.additional_kwargs.handoff_parallel_siblings;
+    const siblingIds: string[] = Array.isArray(rawSiblings)
+      ? rawSiblings.filter((s): s is string => typeof s === 'string')
+      : [];
+    /** Convert IDs to display names */
+    const parallelSiblings = siblingIds.map((id) => {
+      const ctx = this.agentContexts.get(id);
+      return ctx?.name ?? id;
+    });
+
+    /** Get the tool_call_id to find and filter the AI message's tool call */
+    const toolCallId = toolMessage.tool_call_id;
+
+    /**
+     * Collect all transfer tool_call_ids to filter out.
+     * For parallel handoffs, we filter ALL transfer messages (not just ours)
+     * to give the receiving agent a clean context without handoff noise.
+     */
+    const transferToolCallIds = new Set<string>([toolCallId]);
+    for (const msg of messages) {
+      if (msg.getType() !== 'tool') continue;
+      const tm = msg as ToolMessage;
+      const tName = tm.name;
+      if (typeof tName !== 'string') continue;
+      if (
+        tName.startsWith(Constants.LC_TRANSFER_TO_) ||
+        tName === 'conditional_transfer'
+      ) {
+        transferToolCallIds.add(tm.tool_call_id);
+      }
+    }
+
+    /** Filter out all transfer messages */
+    const filteredMessages: BaseMessage[] = [];
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const msgType = msg.getType();
+
+      /** Skip transfer ToolMessages */
+      if (msgType === 'tool') {
+        const tm = msg as ToolMessage;
+        if (transferToolCallIds.has(tm.tool_call_id)) {
+          continue;
+        }
+      }
+
+      if (msgType === 'ai') {
+        /** Check if this AI message contains any transfer tool calls */
+        const aiMsg = msg as AIMessage | AIMessageChunk;
+        const toolCalls = aiMsg.tool_calls;
+
+        if (toolCalls && toolCalls.length > 0) {
+          /** Filter out all transfer tool calls */
+          const remainingToolCalls = toolCalls.filter(
+            (tc) => tc.id == null || !transferToolCallIds.has(tc.id)
+          );
+
+          const hasTransferCalls = remainingToolCalls.length < toolCalls.length;
+
+          if (hasTransferCalls) {
+            if (
+              remainingToolCalls.length > 0 ||
+              (typeof aiMsg.content === 'string' && aiMsg.content.trim())
+            ) {
+              /** Keep the message but without transfer tool calls */
+              const filteredAiMsg = new AIMessage({
+                content: aiMsg.content,
+                tool_calls: remainingToolCalls,
+                id: aiMsg.id,
+              });
+              filteredMessages.push(filteredAiMsg);
+            }
+            /** If no remaining content or tool calls, skip this message entirely */
+            continue;
+          }
+        }
+      }
+
+      /** Keep all other messages */
+      filteredMessages.push(msg);
+    }
+
+    return {
+      filteredMessages,
+      instructions,
+      sourceAgentName,
+      parallelSiblings,
+    };
   }
 
   /**
@@ -355,26 +744,133 @@ export class MultiAgentGraph extends StandardGraph {
       /** Agent subgraph (includes agent + tools) */
       const agentSubgraph = this.createAgentSubgraph(agentId);
 
-      /** Wrapper function that handles agentMessages channel and conditional routing */
+      /** Wrapper function that handles agentMessages channel, handoff reception, and conditional routing */
       const agentWrapper = async (
-        state: t.MultiAgentGraphState
+        state: t.MultiAgentGraphState,
+        config?: LangGraphRunnableConfig
       ): Promise<t.MultiAgentGraphState | Command> => {
         let result: t.MultiAgentGraphState;
 
-        if (state.agentMessages != null && state.agentMessages.length > 0) {
+        /**
+         * Check if this agent is receiving a handoff.
+         * If so, filter out the transfer messages and inject instructions as preamble.
+         * This prevents the receiving agent from seeing the transfer as "completed work"
+         * and prematurely producing an end token.
+         */
+        const handoffContext = this.processHandoffReception(
+          state.messages,
+          agentId
+        );
+
+        if (handoffContext !== null) {
+          const {
+            filteredMessages,
+            instructions,
+            sourceAgentName,
+            parallelSiblings,
+          } = handoffContext;
+
+          /**
+           * Set handoff context on the receiving agent.
+           * Uses pre-computed graph position for depth and parallel info.
+           */
+          const agentContext = this.agentContexts.get(agentId);
+          if (
+            agentContext &&
+            sourceAgentName != null &&
+            sourceAgentName !== ''
+          ) {
+            agentContext.setHandoffContext(sourceAgentName, parallelSiblings);
+          }
+
+          /** Build messages for the receiving agent */
+          let messagesForAgent = filteredMessages;
+
+          /**
+           * If there are instructions, inject them as a HumanMessage to
+           * ground the receiving agent.
+           *
+           * When the last filtered message is a ToolMessage (e.g. from a
+           * non-handoff tool the router called before handing off), a
+           * synthetic AIMessage is inserted first to satisfy the
+           * tool → assistant role ordering required by chat APIs.  Without
+           * this bridge, appending a HumanMessage directly after a
+           * ToolMessage causes "400 Unexpected role 'user' after role
+           * 'tool'" errors (see issue #54).
+           */
+          const hasInstructions = instructions !== null && instructions !== '';
+          if (hasInstructions) {
+            const lastMsg =
+              filteredMessages.length > 0
+                ? filteredMessages[filteredMessages.length - 1]
+                : null;
+
+            if (lastMsg != null && lastMsg.getType() === 'tool') {
+              messagesForAgent = [
+                ...filteredMessages,
+                new AIMessage(
+                  `[Processed tool result and transferring to ${agentId}]`
+                ),
+                new HumanMessage(instructions),
+              ];
+            } else {
+              messagesForAgent = [
+                ...filteredMessages,
+                new HumanMessage(instructions),
+              ];
+            }
+          }
+
+          /** Update token map if we have a token counter */
+          if (agentContext?.tokenCounter && hasInstructions) {
+            const freshTokenMap: Record<string, number> = {};
+            for (
+              let i = 0;
+              i < Math.min(filteredMessages.length, this.startIndex);
+              i++
+            ) {
+              const tokenCount = agentContext.indexTokenCountMap[i];
+              if (tokenCount !== undefined) {
+                freshTokenMap[i] = tokenCount;
+              }
+            }
+            /** Add tokens for the bridge AIMessage + instructions HumanMessage */
+            for (
+              let i = filteredMessages.length;
+              i < messagesForAgent.length;
+              i++
+            ) {
+              freshTokenMap[i] = agentContext.tokenCounter(messagesForAgent[i]);
+            }
+            agentContext.updateTokenMapWithInstructions(freshTokenMap);
+          }
+
+          const transformedState: t.MultiAgentGraphState = {
+            ...state,
+            messages: messagesForAgent,
+          };
+          result = await agentSubgraph.invoke(transformedState, config);
+          result = {
+            ...result,
+            agentMessages: [],
+          };
+        } else if (
+          state.agentMessages != null &&
+          state.agentMessages.length > 0
+        ) {
           /**
            * When using agentMessages (excludeResults=true), we need to update
            * the token map to account for the new prompt message
            */
           const agentContext = this.agentContexts.get(agentId);
           if (agentContext && agentContext.tokenCounter) {
-            // The agentMessages contains:
-            // 1. Filtered messages (0 to startIndex) - already have token counts
-            // 2. New prompt message - needs token counting
-
+            /** The agentMessages contains:
+             * 1. Filtered messages (0 to startIndex) - already have token counts
+             * 2. New prompt message - needs token counting
+             */
             const freshTokenMap: Record<string, number> = {};
 
-            // Copy existing token counts for filtered messages (0 to startIndex)
+            /** Copy existing token counts for filtered messages (0 to startIndex) */
             for (let i = 0; i < this.startIndex; i++) {
               const tokenCount = agentContext.indexTokenCountMap[i];
               if (tokenCount !== undefined) {
@@ -382,7 +878,7 @@ export class MultiAgentGraph extends StandardGraph {
               }
             }
 
-            // Calculate tokens only for the new prompt message (last message)
+            /** Calculate tokens only for the new prompt message (last message) */
             const promptMessageIndex = state.agentMessages.length - 1;
             if (promptMessageIndex >= this.startIndex) {
               const promptMessage = state.agentMessages[promptMessageIndex];
@@ -390,7 +886,7 @@ export class MultiAgentGraph extends StandardGraph {
                 agentContext.tokenCounter(promptMessage);
             }
 
-            // Update the agent's token map with instructions added
+            /** Update the agent's token map with instructions added */
             agentContext.updateTokenMapWithInstructions(freshTokenMap);
           }
 
@@ -399,14 +895,14 @@ export class MultiAgentGraph extends StandardGraph {
             ...state,
             messages: state.agentMessages,
           };
-          result = await agentSubgraph.invoke(transformedState);
+          result = await agentSubgraph.invoke(transformedState, config);
           result = {
             ...result,
             /** Clear agentMessages for next agent */
             agentMessages: [],
           };
         } else {
-          result = await agentSubgraph.invoke(state);
+          result = await agentSubgraph.invoke(state, config);
         }
 
         /** If agent has both handoff and direct edges, use Command for exclusive routing */

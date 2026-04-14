@@ -1,4 +1,4 @@
-import * as types from '../types';
+import * as types from '../global-types';
 import * as r from '../roles';
 import * as p from '../permissions';
 import {

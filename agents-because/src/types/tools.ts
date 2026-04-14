@@ -25,24 +25,6 @@ export type ToolRefs = {
 
 export type ToolRefGenerator = (tool_calls: ToolCall[]) => ToolRefs;
 
-export type ToolNodeOptions = {
-  name?: string;
-  tags?: string[];
-  handleToolErrors?: boolean;
-  loadRuntimeTools?: ToolRefGenerator;
-  toolCallStepIds?: Map<string, string>;
-  /** Map of tool call index -> {name, id} for recovering missing info (dashscope issue) */
-  toolCallInfoByIndex?: Map<number, { name: string; id: string }>;
-  errorHandler?: (
-    data: ToolErrorData,
-    metadata?: Record<string, unknown>
-  ) => Promise<void>;
-  /** Tool registry for lazy computation of programmatic tools and tool search */
-  toolRegistry?: LCToolRegistry;
-};
-
-export type ToolNodeConstructorParams = ToolRefs & ToolNodeOptions;
-
 export type ToolEndEvent = {
   /** The Step Id of the Tool Call */
   id: string;
@@ -58,6 +40,92 @@ export type CodeEnvFile = {
   session_id: string;
 };
 
+export type FileRef = {
+  id: string;
+  name: string;
+  path?: string;
+};
+
+export type FileRefs = FileRef[];
+
+/** Mutable code-execution session tracked on the graph for ToolNode injection. */
+export type CodeSessionContext = {
+  session_id: string;
+  files?: CodeEnvFile[];
+  lastUpdated?: number;
+};
+
+/** Session bucket for code execution / programmatic tools (keyed by tool name constant). */
+export type ToolSessionMap = Map<string, CodeSessionContext | Record<string, unknown>>;
+
+export type ToolNodeOptions = {
+  name?: string;
+  tags?: string[];
+  handleToolErrors?: boolean;
+  loadRuntimeTools?: ToolRefGenerator;
+  toolCallStepIds?: Map<string, string>;
+  /** Map of tool call index -> {name, id} for recovering missing info (dashscope issue) */
+  toolCallInfoByIndex?: Map<number, { name: string; id: string }>;
+  errorHandler?: (
+    data: ToolErrorData,
+    metadata?: Record<string, unknown>
+  ) => Promise<void>;
+  /** Tool registry for lazy computation of programmatic tools and tool search */
+  toolRegistry?: LCToolRegistry;
+  /** Schema-only tool defs in event-driven mode (name → definition); merged with toolRegistry for lookups */
+  toolDefinitions?: LCToolRegistry;
+  /** Graph-owned session map for code execution continuity */
+  sessions?: ToolSessionMap;
+  /** When true, dispatch ON_TOOL_EXECUTE instead of invoking tools in-process */
+  eventDrivenMode?: boolean;
+  agentId?: string;
+  /** Tool names that always execute in-process even in event-driven mode */
+  directToolNames?: Set<string>;
+  maxContextTokens?: number;
+  maxToolResultChars?: number;
+};
+
+export type ToolNodeConstructorParams = ToolRefs & ToolNodeOptions;
+
+/** Artifact shape on tool results that carry session/files from the code API. */
+export type CodeExecutionArtifact = {
+  session_id?: string;
+  files?: FileRefs;
+};
+
+/** Single tool invocation in event-driven (ON_TOOL_EXECUTE) batch. */
+export type ToolCallRequest = {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  stepId?: string;
+  turn: number;
+  codeSessionContext?: {
+    session_id: string;
+    files?: CodeEnvFile[];
+  };
+};
+
+/** Result from host after executing one tool call in event-driven mode. */
+export type ToolExecuteResult = {
+  toolCallId: string;
+  status: 'success' | 'error';
+  content?: unknown;
+  errorMessage?: string;
+  artifact?: unknown;
+};
+
+/** Payload dispatched with ON_TOOL_EXECUTE for the host to run tools and resolve. */
+export type ToolExecuteBatchRequest = {
+  toolCalls: ToolCallRequest[];
+  userId?: string;
+  agentId?: string;
+  configurable?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  resolve: (results: ToolExecuteResult[]) => void;
+  reject: (err: unknown) => void;
+};
+
 export type CodeExecutionToolParams =
   | undefined
   | {
@@ -67,14 +135,6 @@ export type CodeExecutionToolParams =
       files?: CodeEnvFile[];
       [EnvVar.CODE_API_KEY]?: string;
     };
-
-export type FileRef = {
-  id: string;
-  name: string;
-  path?: string;
-};
-
-export type FileRefs = FileRef[];
 
 export type ExecuteResult = {
   session_id: string;
@@ -113,6 +173,8 @@ export type LCTool = {
   name: string;
   description?: string;
   parameters?: JsonSchemaType;
+  /** LangChain tool response shape (e.g. content_and_artifact for code tools) */
+  responseFormat?: 'content' | 'content_and_artifact' | string;
   /** When true, tool is not loaded into context initially (for tool search) */
   defer_loading?: boolean;
   /**

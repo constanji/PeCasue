@@ -24,13 +24,13 @@ const initializeClient = async ({
     AZURE_API_KEY,
     OPENAI_REVERSE_PROXY,
     AZURE_OPENAI_BASEURL,
-    OPENAI_SUMMARIZE,
     DEBUG_OPENAI,
   } = process.env;
   const { key: expiresAt } = req.body;
   const modelName = overrideModel ?? req.body.model;
   const endpoint = overrideEndpoint ?? req.body.endpoint;
-  const contextStrategy = isEnabled(OPENAI_SUMMARIZE) ? 'summarize' : null;
+  /** Context compaction uses top-level `summarization` in app config (Agents path), not env-based summarize. */
+  const contextStrategy = null;
 
   const credentials = {
     [EModelEndpoint.openAI]: OPENAI_API_KEY,

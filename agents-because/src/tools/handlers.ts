@@ -4,7 +4,7 @@ import { nanoid } from 'nanoid';
 import { ToolMessage } from '@langchain/core/messages';
 import type { AnthropicWebSearchResultBlockParam } from '@/llm/anthropic/types';
 import type { ToolCall, ToolCallChunk } from '@langchain/core/messages/tool';
-import type { MultiAgentGraph, StandardGraph } from '@/graphs';
+import type { Graph, MultiAgentGraph, StandardGraph } from '@/graphs';
 import type { AgentContext } from '@/agents/AgentContext';
 import type * as t from '@/types';
 import {
@@ -32,21 +32,6 @@ export async function handleToolCallChunks({
   toolCallChunks: ToolCallChunk[];
   metadata?: Record<string, unknown>;
 }): Promise<void> {
-  // Save tool call info by index for recovering missing name/id later (dashscope issue)
-  // This is needed because dashscope streaming may send name/id in first chunk only
-  for (const chunk of toolCallChunks) {
-    const index = chunk.index ?? 0;
-    const existingInfo = graph.toolCallInfoByIndex.get(index);
-
-    // Update info if we have new name or id
-    const newName = chunk.name && chunk.name !== '' ? chunk.name : existingInfo?.name ?? '';
-    const newId = chunk.id && chunk.id !== '' ? chunk.id : existingInfo?.id ?? '';
-
-    if (newName || newId) {
-      graph.toolCallInfoByIndex.set(index, { name: newName, id: newId });
-    }
-  }
-
   let prevStepId: string;
   let prevRunStep: t.RunStep | undefined;
   try {
@@ -132,6 +117,7 @@ export async function handleToolCallChunks({
       metadata
     );
   }
+
   await graph.dispatchRunStepDelta(stepId, {
     type: StepTypes.TOOL_CALLS,
     tool_calls: toolCallChunks,
@@ -141,10 +127,10 @@ export async function handleToolCallChunks({
 export const handleToolCalls = async (
   toolCalls?: ToolCall[],
   metadata?: Record<string, unknown>,
-  graph?: StandardGraph | MultiAgentGraph
+  graph?: Graph | StandardGraph | MultiAgentGraph
 ): Promise<void> => {
   if (!graph || !metadata) {
-    console.warn('Graph or metadata not found in handleToolCalls');
+    console.warn('Graph or metadata not found in `handleToolCalls`');
     return;
   }
 
@@ -157,6 +143,13 @@ export const handleToolCalls = async (
   }
 
   const stepKey = graph.getStepKey(metadata);
+
+  /**
+   * Track whether we've already reused an empty TOOL_CALLS step created by
+   * handleToolCallChunks during streaming. Only reuse it once (for the first
+   * tool call); subsequent parallel tool calls must create their own steps.
+   */
+  let reusedChunkStepId: string | undefined;
 
   for (const tool_call of toolCalls) {
     const toolCallId = tool_call.id ?? `toolu_${nanoid()}`;
@@ -175,6 +168,27 @@ export const handleToolCalls = async (
     }
 
     /**
+     * If the previous step is TOOL_CALLS (from handleToolCallChunks or a prior
+     * iteration), either reuse it (if empty) or dispatch a new TOOL_CALLS step
+     * directly — skip the intermediate MESSAGE_CREATION to avoid orphaned gaps.
+     */
+    if (prevRunStep?.type === StepTypes.TOOL_CALLS) {
+      const details = prevRunStep.stepDetails as t.ToolCallsDetails;
+      const isEmpty = !details.tool_calls || details.tool_calls.length === 0;
+      if (isEmpty && prevStepId !== reusedChunkStepId) {
+        graph.toolCallStepIds.set(toolCallId, prevStepId);
+        reusedChunkStepId = prevStepId;
+        continue;
+      }
+      await graph.dispatchRunStep(
+        stepKey,
+        { type: StepTypes.TOOL_CALLS, tool_calls: [tool_call] },
+        metadata
+      );
+      continue;
+    }
+
+    /**
      * NOTE: We do NOT dispatch empty text blocks with tool_call_ids because:
      * - Empty text blocks cause providers (Anthropic, Bedrock) to reject messages
      * - They get stored in conversation history and cause errors on replay:
@@ -182,19 +196,9 @@ export const handleToolCalls = async (
      *   "The content field in the Message object is empty" (Bedrock)
      * - The tool_calls themselves are sufficient
      */
-
-    /* If the previous step exists and is a message creation */
-    if (
-      prevStepId &&
-      prevRunStep &&
-      prevRunStep.type === StepTypes.MESSAGE_CREATION
-    ) {
+    if (prevStepId && prevRunStep) {
       graph.messageStepHasToolCalls.set(prevStepId, true);
-      /* If the previous step doesn't exist or is not a message creation */
-    } else if (
-      !prevRunStep ||
-      prevRunStep.type !== StepTypes.MESSAGE_CREATION
-    ) {
+    } else if (!prevRunStep) {
       const messageId = getMessageId(stepKey, graph, true) ?? '';
       const stepId = await graph.dispatchRunStep(
         stepKey,

@@ -55,7 +55,10 @@ export type AnthropicReasoning = {
   thinkingBudget?: number;
 };
 export type OpenAIClientOptions = ChatOpenAIFields;
-export type AnthropicClientOptions = AnthropicInput;
+export type AnthropicClientOptions = AnthropicInput & {
+  /** When true, enables Anthropic prompt-cache tooling (LibreChat-style). */
+  promptCache?: boolean;
+};
 export type MistralAIClientOptions = ChatMistralAIInput;
 export type VertexAIClientOptions = ChatVertexAIInput & {
   includeThoughts?: boolean;
@@ -108,6 +111,7 @@ export type ProviderOptionsMap = {
   [Providers.OPENROUTER]: ChatOpenRouterCallOptions;
   [Providers.BEDROCK]: BedrockConverseClientOptions;
   [Providers.XAI]: XAIClientOptions;
+  [Providers.MOONSHOT]: OpenAIClientOptions;
 };
 
 export type ChatModelMap = {
@@ -122,13 +126,16 @@ export type ChatModelMap = {
   [Providers.OPENROUTER]: ChatOpenRouter;
   [Providers.BEDROCK]: CustomChatBedrockConverse;
   [Providers.GOOGLE]: CustomChatGoogleGenerativeAI;
+  [Providers.MOONSHOT]: ChatOpenAI;
 };
 
 export type ChatModelConstructorMap = {
-  [P in Providers]: new (config: ProviderOptionsMap[P]) => ChatModelMap[P];
+  [P in keyof ProviderOptionsMap]: new (
+    config: ProviderOptionsMap[P]
+  ) => ChatModelMap[P];
 };
 
-export type ChatModelInstance = ChatModelMap[Providers];
+export type ChatModelInstance = ChatModelMap[keyof ChatModelMap];
 
 export type ModelWithTools = ChatModelInstance & {
   bindTools(tools: CommonToolType[]): Runnable;

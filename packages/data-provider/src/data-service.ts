@@ -1,5 +1,5 @@
 import type { AxiosResponse } from 'axios';
-import type * as t from './types';
+import type * as t from './global-types';
 import * as endpoints from './api-endpoints';
 import * as a from './types/assistants';
 import * as ag from './types/agents';

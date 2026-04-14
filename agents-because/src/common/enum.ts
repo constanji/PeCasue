@@ -19,6 +19,16 @@ export enum GraphEvents {
   ON_MESSAGE_DELTA = 'on_message_delta',
   /** [Custom] Reasoning Delta events for messages */
   ON_REASONING_DELTA = 'on_reasoning_delta',
+  /** [Custom] Request to execute tools - dispatched by ToolNode, handled by host */
+  ON_TOOL_EXECUTE = 'on_tool_execute',
+  /** [Custom] Emitted when the summarize node begins generating a summary */
+  ON_SUMMARIZE_START = 'on_summarize_start',
+  /** [Custom] Delta event carrying the completed summary content */
+  ON_SUMMARIZE_DELTA = 'on_summarize_delta',
+  /** [Custom] Emitted when the summarize node completes with the final summary */
+  ON_SUMMARIZE_COMPLETE = 'on_summarize_complete',
+  /** [Custom] Diagnostic logging event for context management observability */
+  ON_AGENT_LOG = 'on_agent_log',
 
   /* Official Events */
 
@@ -82,11 +92,13 @@ export enum Providers {
   DEEPSEEK = 'deepseek',
   OPENROUTER = 'openrouter',
   XAI = 'xai',
+  MOONSHOT = 'moonshot',
 }
 
 export enum GraphNodeKeys {
   TOOLS = 'tools=',
   AGENT = 'agent=',
+  SUMMARIZE = 'summarize=',
   ROUTER = 'router',
   PRE_TOOLS = 'pre_tools',
   POST_TOOLS = 'post_tools',
@@ -120,6 +132,8 @@ export enum ContentTypes {
   REASONING = 'reasoning',
   /** Multi-Agent Switch */
   AGENT_UPDATE = 'agent_update',
+  /** Framework-level conversation summary block */
+  SUMMARY = 'summary',
   /** Bedrock */
   REASONING_CONTENT = 'reasoning_content',
 }
@@ -159,11 +173,17 @@ export enum Callback {
 export enum Constants {
   OFFICIAL_CODE_BASEURL = 'https://api.because.ai/v1',
   EXECUTE_CODE = 'execute_code',
+  /** Tool search (regex-based) — matches `createToolSearchRegexTool` name */
+  TOOL_SEARCH = 'tool_search_regex',
   TOOL_SEARCH_REGEX = 'tool_search_regex',
   PROGRAMMATIC_TOOL_CALLING = 'run_tools_with_code',
   WEB_SEARCH = 'web_search',
   CONTENT_AND_ARTIFACT = 'content_and_artifact',
   LC_TRANSFER_TO_ = 'lc_transfer_to_',
+  /** Delimiter for MCP tools: toolName_mcp_serverName */
+  MCP_DELIMITER = '_mcp_',
+  /** Anthropic server tool ID prefix (web_search, code_execution, etc.) */
+  ANTHROPIC_SERVER_TOOL_PREFIX = 'srvtoolu_',
 }
 
 export enum TitleMethod {
@@ -176,3 +196,9 @@ export enum EnvVar {
   CODE_API_KEY = 'BECAUSE_CODE_API_KEY',
   CODE_BASEURL = 'BECAUSE_CODE_BASEURL',
 }
+
+/** Multiplier for local tool-schema token estimates (Anthropic API reports higher usage). */
+export const ANTHROPIC_TOOL_TOKEN_MULTIPLIER = 1.1;
+
+/** Default multiplier for non-Anthropic providers when estimating tool definition tokens. */
+export const DEFAULT_TOOL_TOKEN_MULTIPLIER = 1.0;

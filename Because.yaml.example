@@ -30,6 +30,23 @@ interface:
   fileCitations: true
   temporaryChat: false
   bookmarks: false
+# Agents 对话摘要与上下文剪枝（替代各端点 summarize / summaryModel / OPENAI_SUMMARIZE）
+summarization:
+  enabled: true
+  provider: openAI
+  model: gpt-4o-mini
+  parameters:
+    temperature: 0.2
+  trigger:
+    type: token_ratio
+    value: 0.85
+  reserveRatio: 0.15
+  maxSummaryTokens: 1024
+  contextPruning:
+    enabled: true
+    keepLastAssistants: 2
+    softTrimRatio: 0.85
+    hardClearRatio: 0.95
 registration:
   socialLogins:
     - github

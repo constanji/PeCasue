@@ -9,6 +9,7 @@ import {
 import { memo } from 'react';
 import type { TMessageContentParts, TAttachment } from '@because/data-provider';
 import { OpenAIImageGen, EmptyText, Reasoning, ExecuteCode, AgentUpdate, Text } from './Parts';
+import Summary from './Parts/Summary';
 import { ErrorMessage } from './MessageContent';
 import { ChartRenderer, extractChartDataFromToolOutput } from './ChartRenderer';
 import RetrievalCall from './RetrievalCall';
@@ -94,6 +95,8 @@ const Part = memo(
         return null;
       }
       return <Reasoning reasoning={reasoning} isLast={isLast ?? false} />;
+    } else if (part.type === ContentTypes.SUMMARY) {
+      return <Summary part={part} />;
     } else if (part.type === ContentTypes.TOOL_CALL) {
       const toolCall = part[ContentTypes.TOOL_CALL];
 

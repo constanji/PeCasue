@@ -2,7 +2,7 @@ import type { InfiniteData } from '@tanstack/react-query';
 import type * as p from '../accessPermissions';
 import type * as a from '../types/agents';
 import type * as s from '../schemas';
-import type * as t from '../types';
+import type * as t from '../global-types';
 
 export type Conversation = {
   id: string;

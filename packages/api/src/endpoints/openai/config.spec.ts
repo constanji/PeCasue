@@ -1242,7 +1242,7 @@ describe('getOpenAIConfig', () => {
 
         // Simulate clientOptions from initialize.js
         const clientOptions = {
-          contextStrategy: 'summarize',
+          contextStrategy: null,
           proxy: null,
           debug: false,
           reverseProxyUrl: null,
@@ -1401,10 +1401,8 @@ describe('getOpenAIConfig', () => {
           titleConvo: true,
           titleModel: 'gpt-3.5-turbo',
           forcePrompt: false,
-          summaryModel: 'gpt-3.5-turbo',
           modelDisplayLabel: 'Custom GPT-4',
           titleMethod: 'completion',
-          contextStrategy: 'summarize',
           directEndpoint: true,
           titleMessageRole: 'user',
           streamRate: 25,
@@ -1420,10 +1418,8 @@ describe('getOpenAIConfig', () => {
           titleConvo: endpointConfig.titleConvo,
           titleModel: endpointConfig.titleModel,
           forcePrompt: endpointConfig.forcePrompt,
-          summaryModel: endpointConfig.summaryModel,
           modelDisplayLabel: endpointConfig.modelDisplayLabel,
           titleMethod: endpointConfig.titleMethod,
-          contextStrategy: endpointConfig.contextStrategy,
           directEndpoint: endpointConfig.directEndpoint,
           titleMessageRole: endpointConfig.titleMessageRole,
           streamRate: endpointConfig.streamRate,

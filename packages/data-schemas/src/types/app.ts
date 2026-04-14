@@ -9,6 +9,7 @@ import type {
   TAgentsEndpoint,
   TCustomEndpoints,
   TAssistantEndpoint,
+  SummarizationConfig,
 } from '@because/data-provider';
 
 export type JsonSchemaType = {
@@ -54,6 +55,8 @@ export interface AppConfig {
   };
   /** Memory configuration */
   memory?: TMemoryConfig;
+  /** Global conversation summarization & context pruning (replaces per-endpoint summarize/summaryModel) */
+  summarization?: SummarizationConfig;
   /** Web search configuration */
   webSearch?: TCustomConfig['webSearch'];
   /** File storage strategy ('local', 's3', 'firebase', 'azure_blob') */

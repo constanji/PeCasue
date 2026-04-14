@@ -1,4 +1,4 @@
-import type * as t from './types';
+import type * as t from './global-types';
 import { EndpointURLs } from './config';
 import * as s from './schemas';
 

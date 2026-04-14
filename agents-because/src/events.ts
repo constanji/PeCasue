@@ -11,6 +11,16 @@ import type * as t from '@/types';
 import { handleToolCalls } from '@/tools/handlers';
 import { Constants, Providers } from '@/common';
 
+/** Optional DashScope/OpenAI-compat helpers that may exist on graph implementations. */
+type GraphWithDashScopeToolRecovery = (StandardGraph | MultiAgentGraph) & {
+  toolCallInfoByIndex?: Map<number, { name: string; id: string }>;
+  handleToolCallCompleted?: (
+    payload: { input: unknown; output: unknown },
+    metadata: Record<string, unknown>,
+    omitOutput?: boolean
+  ) => Promise<void>;
+};
+
 export class HandlerRegistry {
   private handlers: Map<string, t.EventHandler> = new Map();
 
@@ -60,6 +70,7 @@ export class ModelEndHandler implements t.EventHandler {
     }> | undefined;
 
     const agentContext = graph.getAgentContext(metadata);
+    const g = graph as GraphWithDashScopeToolRecovery;
 
     // 从标准位置获取工具调用，或从additional_kwargs转换
     let toolCalls = data?.output?.tool_calls;
@@ -76,7 +87,7 @@ export class ModelEndHandler implements t.EventHandler {
         })
         .map((tc, index) => {
           // 如果丢失了，试着从保存的信息中恢复姓名/ID。
-          const savedInfo = graph.toolCallInfoByIndex.get(index);
+          const savedInfo = g.toolCallInfoByIndex?.get(index);
           const name = (tc.function?.name && tc.function.name.length > 0)
             ? tc.function.name
             : savedInfo?.name || '';
@@ -144,12 +155,16 @@ export class ToolEndHandler implements t.EventHandler {
   private omitOutput?: (name?: string) => boolean;
   constructor(
     callback?: t.ToolEndCallback,
-    logger?: Logger,
+    loggerOrOmit?: Logger | ((name?: string) => boolean),
     omitOutput?: (name?: string) => boolean
   ) {
     this.callback = callback;
-    this.logger = logger;
-    this.omitOutput = omitOutput;
+    if (typeof loggerOrOmit === 'function') {
+      this.omitOutput = loggerOrOmit;
+    } else {
+      this.logger = loggerOrOmit;
+      this.omitOutput = omitOutput;
+    }
   }
   async handle(
     event: string,
@@ -184,11 +199,14 @@ export class ToolEndHandler implements t.EventHandler {
       if (this.callback) {
         await this.callback(toolEndData, metadata);
       }
-      await graph.handleToolCallCompleted(
-        { input: toolEndData.input, output: toolEndData.output },
-        metadata,
-        this.omitOutput?.((toolEndData.output as ToolMessage | undefined)?.name)
-      );
+      const g = graph as GraphWithDashScopeToolRecovery;
+      if (g.handleToolCallCompleted) {
+        await g.handleToolCallCompleted(
+          { input: toolEndData.input, output: toolEndData.output },
+          metadata,
+          this.omitOutput?.((toolEndData.output as ToolMessage | undefined)?.name)
+        );
+      }
     } catch (error) {
       if (this.logger) {
         this.logger.error('Error handling tool_end event:', error);

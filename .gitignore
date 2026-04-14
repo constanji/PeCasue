@@ -15,8 +15,9 @@ pids
 *.pid
 *.seed
 .git
-utils/
-!utils/docker/
+# 仅忽略仓库根目录下的 utils/（避免误伤 agents-because/src/utils 等路径）
+/utils/
+!/utils/docker/
 # CI/CD data
 test-image*
 

@@ -107,24 +107,27 @@ export function getChunkContent({
         | undefined
     )?.summary?.[0]?.text;
   }
-  if (
-    provider === Providers.OPENROUTER &&
-    chunk?.additional_kwargs?.reasoning_details != null &&
-    Array.isArray(chunk.additional_kwargs.reasoning_details)
-  ) {
-    // Extract text from reasoning_details array (for Gemini, DeepSeek, etc.)
-    const textEntries = chunk.additional_kwargs.reasoning_details
-      .filter(
-        (detail) =>
-          detail.type === 'reasoning.text' &&
-          detail.text != null &&
-          detail.text !== ''
-      )
-      .map((detail) => detail.text)
-      .join('');
-    if (textEntries) {
-      return textEntries;
+  /**
+   * For OpenRouter, reasoning is stored in additional_kwargs.reasoning (not reasoning_content).
+   * NOTE: We intentionally do NOT extract text from reasoning_details here.
+   * The reasoning_details array contains the FULL accumulated reasoning text (set only on final chunk),
+   * but individual reasoning tokens are already streamed via additional_kwargs.reasoning.
+   * Extracting from reasoning_details would cause duplication.
+   * The reasoning_details is only used for:
+   * 1. Detecting reasoning mode in handleReasoning()
+   * 2. Final message storage (for thought signatures)
+   */
+  if (provider === Providers.OPENROUTER) {
+    // Content presence signals end of reasoning phase - prefer content over reasoning
+    // This handles transitional chunks that may have both reasoning and content
+    if (typeof chunk?.content === 'string' && chunk.content !== '') {
+      return chunk.content;
     }
+    const reasoning = chunk?.additional_kwargs?.reasoning as string | undefined;
+    if (reasoning != null && reasoning !== '') {
+      return reasoning;
+    }
+    return chunk?.content;
   }
   return (
     ((chunk?.additional_kwargs?.[reasoningKey] as string | undefined) ?? '') ||
@@ -145,6 +148,7 @@ export class ChatModelStreamHandler implements t.EventHandler {
     if (!graph.config) {
       throw new Error('Config not found in graph');
     }
+
     if (!data.chunk) {
       console.warn(`No chunk found in ${event} event`);
       return;
@@ -169,29 +173,19 @@ export class ChatModelStreamHandler implements t.EventHandler {
     }
     this.handleReasoning(chunk, agentContext);
     let hasToolCalls = false;
-
-    if (chunk.tool_calls && chunk.tool_calls.length > 0) {
-      // 过滤有效tool_calls（必须有非空的 id 和名称）
-      const validToolCalls = chunk.tool_calls.filter(
+    if (
+      chunk.tool_calls &&
+      chunk.tool_calls.length > 0 &&
+      chunk.tool_calls.every(
         (tc) =>
           tc.id != null &&
           tc.id !== '' &&
           (tc as Partial<ToolCall>).name != null &&
           tc.name !== ''
-      );
-
-      // 记录某些tool_calls无效时（帮助诊断供应商问题，比如dashscope）
-      if (validToolCalls.length !== chunk.tool_calls.length) {
-        const provider = agentContext.provider;
-        const invalidCount = chunk.tool_calls.length - validToolCalls.length;
-        console.log(`[Stream] Provider: ${provider}, filtered out ${invalidCount} invalid tool_calls (missing id or name), processing ${validToolCalls.length} valid ones`);
-      }
-
-      // 只处理有效tool_calls
-      if (validToolCalls.length > 0) {
-        hasToolCalls = true;
-        await handleToolCalls(validToolCalls, metadata, graph);
-      }
+      )
+    ) {
+      hasToolCalls = true;
+      await handleToolCalls(chunk.tool_calls, metadata, graph);
     }
 
     const hasToolCallChunks =
@@ -346,7 +340,8 @@ hasToolCallChunks: ${hasToolCallChunks}
         (c) =>
           (c.type?.startsWith(ContentTypes.THINKING) ?? false) ||
           (c.type?.startsWith(ContentTypes.REASONING) ?? false) ||
-          (c.type?.startsWith(ContentTypes.REASONING_CONTENT) ?? false)
+          (c.type?.startsWith(ContentTypes.REASONING_CONTENT) ?? false) ||
+          c.type === 'redacted_thinking'
       )
     ) {
       await graph.dispatchReasoningDelta(stepId, {
@@ -372,7 +367,8 @@ hasToolCallChunks: ${hasToolCallChunks}
       Array.isArray(chunk.content) &&
       (chunk.content[0]?.type === ContentTypes.THINKING ||
         chunk.content[0]?.type === ContentTypes.REASONING ||
-        chunk.content[0]?.type === ContentTypes.REASONING_CONTENT)
+        chunk.content[0]?.type === ContentTypes.REASONING_CONTENT ||
+        chunk.content[0]?.type === 'redacted_thinking')
     ) {
       reasoning_content = 'valid';
     } else if (
@@ -386,9 +382,14 @@ hasToolCallChunks: ${hasToolCallChunks}
       reasoning_content = 'valid';
     } else if (
       agentContext.provider === Providers.OPENROUTER &&
-      chunk.additional_kwargs?.reasoning_details != null &&
-      Array.isArray(chunk.additional_kwargs.reasoning_details) &&
-      chunk.additional_kwargs.reasoning_details.length > 0
+      // Only set reasoning as valid if content is NOT present (content signals end of reasoning)
+      (chunk.content == null || chunk.content === '') &&
+      // Check for reasoning_details (final chunk) OR reasoning string (intermediate chunks)
+      ((chunk.additional_kwargs?.reasoning_details != null &&
+        Array.isArray(chunk.additional_kwargs.reasoning_details) &&
+        chunk.additional_kwargs.reasoning_details.length > 0) ||
+        (typeof chunk.additional_kwargs?.reasoning === 'string' &&
+          chunk.additional_kwargs.reasoning !== ''))
     ) {
       reasoning_content = 'valid';
     }
@@ -411,6 +412,7 @@ hasToolCallChunks: ${hasToolCallChunks}
     ) {
       agentContext.currentTokenType = ContentTypes.TEXT;
       agentContext.tokenTypeSwitch = 'content';
+      agentContext.reasoningTransitionCount++;
     } else if (
       chunk.content != null &&
       typeof chunk.content === 'string' &&
@@ -444,6 +446,11 @@ export function createContentAggregator(): t.ContentAggregatorResult {
   const contentParts: Array<t.MessageContentComplex | undefined> = [];
   const stepMap = new Map<string, t.RunStep>();
   const toolCallIdMap = new Map<string, string>();
+  // Track agentId and groupId for each content index (applied to content parts)
+  const contentMetaMap = new Map<
+    number,
+    { agentId?: string; groupId?: number }
+  >();
 
   const updateContent = (
     index: number,
@@ -460,7 +467,7 @@ export function createContentAggregator(): t.ContentAggregatorResult {
       return;
     }
 
-    if (!contentParts[index]) {
+    if (!contentParts[index] && partType !== ContentTypes.TOOL_CALL) {
       contentParts[index] = { type: partType };
     }
 
@@ -507,6 +514,18 @@ export function createContentAggregator(): t.ContentAggregatorResult {
       };
 
       contentParts[index] = update;
+    } else if (partType === ContentTypes.SUMMARY) {
+      const currentSummary = contentParts[index] as
+        | t.SummaryContentBlock
+        | undefined;
+      const incoming = contentPart as t.SummaryContentBlock;
+      contentParts[index] = {
+        ...incoming,
+        content: [
+          ...(currentSummary?.content ?? []),
+          ...(incoming.content ?? []),
+        ],
+      };
     } else if (
       partType === ContentTypes.IMAGE_URL &&
       'image_url' in contentPart
@@ -530,38 +549,17 @@ export function createContentAggregator(): t.ContentAggregatorResult {
       // Consolidate with any previously accumulated args from chunks
       const hasValidName = incomingName != null && incomingName !== '';
 
+      // Only process if incoming has a valid name (complete tool call)
+      // or if we're doing a final update with complete data
+      if (!hasValidName && !finalUpdate) {
+        return;
+      }
+
       const existingContent = contentParts[index] as
         | (Omit<t.ToolCallContent, 'tool_call'> & {
             tool_call?: t.ToolCallPart;
           })
         | undefined;
-
-      // 允许处理，条件如下：
-      // 1. 拥有有效的名称（完整的工具调用或第一块）
-      // 2. 是最终更新
-      // 3. 有现有内容可附加 args（后续块用于 dashscope/openai 兼容 API）
-      const hasExistingToolCall = existingContent?.tool_call != null;
-      const hasArgsToAppend = toolCallArgs != null && toolCallArgs !== '';
-
-      if (!hasValidName && !finalUpdate && !hasExistingToolCall && !hasArgsToAppend) {
-        return;
-      }
-
-      // 如果我们有 args，但没有现有的工具调用和名称，我们需要初始化
-      // 这处理了块到来顺序不一致的边缘情况
-      if (!hasExistingToolCall && !hasValidName && hasArgsToAppend) {
-        // 暂时存储 args，等待带有名称/ID 的块
-        contentParts[index] = {
-          type: ContentTypes.TOOL_CALL,
-          tool_call: {
-            id: incomingId ?? '',
-            name: '',
-            args: toolCallArgs,
-            type: ToolCallTypes.TOOL_CALL,
-          },
-        };
-        return;
-      }
 
       /** When args are a valid object, they are likely already invoked */
       let args =
@@ -591,6 +589,16 @@ export function createContentAggregator(): t.ContentAggregatorResult {
         type: ToolCallTypes.TOOL_CALL,
       };
 
+      const auth =
+        contentPart.tool_call.auth ?? existingContent?.tool_call?.auth;
+      const expiresAt =
+        contentPart.tool_call.expires_at ??
+        existingContent?.tool_call?.expires_at;
+      if (auth != null) {
+        newToolCall.auth = auth;
+        newToolCall.expires_at = expiresAt;
+      }
+
       if (finalUpdate) {
         newToolCall.progress = 1;
         newToolCall.output = contentPart.tool_call.output;
@@ -600,6 +608,17 @@ export function createContentAggregator(): t.ContentAggregatorResult {
         type: ContentTypes.TOOL_CALL,
         tool_call: newToolCall,
       };
+    }
+
+    // Apply agentId (for MultiAgentGraph) and groupId (for parallel execution) to content parts
+    // - agentId present → MultiAgentGraph (show agent labels)
+    // - groupId present → parallel execution (render columns)
+    const meta = contentMetaMap.get(index);
+    if (meta?.agentId != null) {
+      (contentParts[index] as t.MessageContentComplex).agentId = meta.agentId;
+    }
+    if (meta?.groupId != null) {
+      (contentParts[index] as t.MessageContentComplex).groupId = meta.groupId;
     }
   };
 
@@ -612,14 +631,65 @@ export function createContentAggregator(): t.ContentAggregatorResult {
       | t.RunStep
       | t.AgentUpdate
       | t.MessageDeltaEvent
+      | t.ReasoningDeltaEvent
       | t.RunStepDeltaEvent
+      | t.SummarizeDeltaData
+      | t.SummarizeCompleteEvent
       | { result: t.ToolEndEvent };
   }): void => {
+    if (event === GraphEvents.ON_SUMMARIZE_DELTA) {
+      const deltaData = data as t.SummarizeDeltaData;
+      const runStep = stepMap.get(deltaData.id);
+      if (!runStep) {
+        console.warn('No run step found for summarize delta event');
+        return;
+      }
+      updateContent(runStep.index, deltaData.delta.summary);
+      return;
+    }
+
+    if (event === GraphEvents.ON_SUMMARIZE_COMPLETE) {
+      const completeData = data as t.SummarizeCompleteEvent;
+      const summary = completeData.summary;
+      if (!summary?.boundary) {
+        return;
+      }
+      const runStep = stepMap.get(summary.boundary.messageId);
+      if (!runStep) {
+        return;
+      }
+      // Replace accumulated delta text with the authoritative final summary.
+      // Multi-stage summarization streams deltas from each chunk, which
+      // concatenate in updateContent.  This event carries only the correct
+      // final text from the last stage.
+      contentParts[runStep.index] = summary;
+      return;
+    }
+
     if (event === GraphEvents.ON_RUN_STEP) {
       const runStep = data as t.RunStep;
       stepMap.set(runStep.id, runStep);
 
-      // Store tool call IDs if present
+      // Track agentId (MultiAgentGraph) and groupId (parallel execution) separately
+      // - agentId: present for all MultiAgentGraph runs (enables agent labels in UI)
+      // - groupId: present only for parallel execution (enables column rendering)
+      const hasAgentId = runStep.agentId != null && runStep.agentId !== '';
+      const hasGroupId = runStep.groupId != null;
+      if (hasAgentId || hasGroupId) {
+        const existingMeta = contentMetaMap.get(runStep.index) ?? {};
+        if (hasAgentId) {
+          existingMeta.agentId = runStep.agentId;
+        }
+        if (hasGroupId) {
+          existingMeta.groupId = runStep.groupId;
+        }
+        contentMetaMap.set(runStep.index, existingMeta);
+      }
+
+      if (runStep.summary != null) {
+        updateContent(runStep.index, runStep.summary);
+      }
+
       if (
         runStep.stepDetails.type === StepTypes.TOOL_CALLS &&
         runStep.stepDetails.tool_calls
@@ -695,22 +765,14 @@ export function createContentAggregator(): t.ContentAggregatorResult {
         runStepDelta.delta.tool_calls.forEach((toolCallDelta) => {
           const toolCallId = toolCallIdMap.get(runStepDelta.id);
 
-          // 如果这是仅限args的区块，请保留现有内容以保留name/id。
-          // 它处理的是 DashScope/OpenAI 兼容的 API，其中 args 是分开的
-          const existingContent = contentParts[runStep.index] as
-            | (Omit<t.ToolCallContent, 'tool_call'> & {
-                tool_call?: t.ToolCallPart;
-              })
-            | undefined;
-
           const contentPart: t.MessageContentComplex = {
             type: ContentTypes.TOOL_CALL,
             tool_call: {
               args: toolCallDelta.args ?? '',
-              // 如果这块区块没有现有名称（dashscope问题），请保留现有名称。
-              name: toolCallDelta.name ?? existingContent?.tool_call?.name,
-              // 保留现有的ID，或从map上使用。
-              id: toolCallId ?? toolCallDelta.id ?? existingContent?.tool_call?.id,
+              name: toolCallDelta.name,
+              id: toolCallId,
+              auth: runStepDelta.delta.auth,
+              expires_at: runStepDelta.delta.expires_at,
             },
           };
 
@@ -718,24 +780,33 @@ export function createContentAggregator(): t.ContentAggregatorResult {
         });
       }
     } else if (event === GraphEvents.ON_RUN_STEP_COMPLETED) {
-      const { result } = data as unknown as { result: t.ToolEndEvent };
+      const { result } = data as unknown as {
+        result:
+          | t.ToolEndEvent
+          | (t.SummaryCompleted & { id: string; index: number });
+      };
 
       const { id: stepId } = result;
 
       const runStep = stepMap.get(stepId);
       if (!runStep) {
-        console.warn(
-          'No run step or runId found for completed tool call event'
-        );
+        console.warn('No run step or runId found for completed step event');
         return;
       }
 
-      const contentPart: t.MessageContentComplex = {
-        type: ContentTypes.TOOL_CALL,
-        tool_call: result.tool_call,
-      };
-
-      updateContent(runStep.index, contentPart, true);
+      if (
+        'type' in result &&
+        result.type === ContentTypes.SUMMARY &&
+        'summary' in result
+      ) {
+        contentParts[runStep.index] = result.summary as t.MessageContentComplex;
+      } else if ('tool_call' in result) {
+        const contentPart: t.MessageContentComplex = {
+          type: ContentTypes.TOOL_CALL,
+          tool_call: (result as t.ToolEndEvent).tool_call,
+        };
+        updateContent(runStep.index, contentPart, true);
+      }
     }
   };
 

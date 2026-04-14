@@ -1,7 +1,7 @@
 require('events').EventEmitter.defaultMaxListeners = 100;
 const { logger } = require('@because/data-schemas');
 const { DynamicStructuredTool } = require('@langchain/core/tools');
-const { getBufferString, HumanMessage } = require('@langchain/core/messages');
+const { HumanMessage } = require('@langchain/core/messages');
 const {
   createRun,
   Tokenizer,
@@ -50,6 +50,65 @@ const BaseClient = require('~/app/clients/BaseClient');
 const { getRoleByName } = require('~/models/Role');
 const { loadAgent } = require('~/models/Agent');
 const { getMCPManager } = require('~/config');
+
+/**
+ * 与 LangChain `getBufferString` 输出格式对齐，但每条消息只调用一次 `_getType()`。
+ * LC 自带实现会对同一条消息多次调用 `_getType()`（每个 `if` 各调一次），若某实现在边界返回 `undefined`，
+ * 会误落入 `else` 并抛出 `Got unsupported message type: undefined`。
+ * 此处对 `remove` / 未知类型跳过；`_getType` 缺失时跳过。
+ * @param {import('@langchain/core/messages').BaseMessage[]} messages
+ * @returns {string}
+ */
+function formatChatHistoryForMemoryBuffer(messages, humanPrefix = 'Human', aiPrefix = 'AI') {
+  const stringMessages = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m == null) {
+      continue;
+    }
+    if (typeof m._getType !== 'function') {
+      logger.debug(`[AgentClient] formatChatHistoryForMemoryBuffer: skip [${i}] (no _getType)`);
+      continue;
+    }
+    let type;
+    try {
+      type = m._getType();
+    } catch {
+      logger.debug(`[AgentClient] formatChatHistoryForMemoryBuffer: skip [${i}] (_getType threw)`);
+      continue;
+    }
+    if (type == null) {
+      logger.debug(`[AgentClient] formatChatHistoryForMemoryBuffer: skip [${i}] (_getType undefined)`);
+      continue;
+    }
+    let role;
+    if (type === 'human') {
+      role = humanPrefix;
+    } else if (type === 'ai') {
+      role = aiPrefix;
+    } else if (type === 'system') {
+      role = 'System';
+    } else if (type === 'function') {
+      role = 'Function';
+    } else if (type === 'tool') {
+      role = 'Tool';
+    } else if (type === 'generic') {
+      role = m.role ?? 'Generic';
+    } else if (type === 'remove') {
+      continue;
+    } else {
+      logger.debug(
+        `[AgentClient] formatChatHistoryForMemoryBuffer: skip [${i}] unsupported type "${String(type)}"`,
+      );
+      continue;
+    }
+    const nameStr = m.name ? `${m.name}, ` : '';
+    const readableContent =
+      typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2);
+    stringMessages.push(`${role}: ${nameStr}${readableContent}`);
+  }
+  return stringMessages.join('\n');
+}
 
 const omitTitleOptions = new Set([
   'stream',
@@ -558,6 +617,9 @@ class AgentClient extends BaseClient {
           agent_id: memoryConfig.agent.id,
           endpoint: EModelEndpoint.agents,
         });
+      } else if (memoryConfig.agent?.id != null) {
+        /** Same agent as the current conversation — reuse loaded agent (instructions/tools context). */
+        prelimAgent = this.options.agent;
       } else if (
         memoryConfig.agent?.id == null &&
         memoryConfig.agent?.model != null &&
@@ -570,6 +632,14 @@ class AgentClient extends BaseClient {
         '[api/server/controllers/agents/client.js #useMemory] Error loading agent for memory',
         error,
       );
+    }
+
+    if (!prelimAgent) {
+      logger.warn(
+        '[api/server/controllers/agents/client.js #useMemory] No preliminary agent resolved for memory',
+        memoryConfig,
+      );
+      return;
     }
 
     const agent = await initializeAgent({
@@ -630,7 +700,7 @@ class AgentClient extends BaseClient {
   }
 
   /**
-   * LangChain {@link getBufferString} 仅支持 human/ai/system/function/tool/generic。
+   * 与 {@link formatChatHistoryForMemoryBuffer} / LangChain getBufferString 支持的类型一致。
    * 图里的 RemoveMessage（remove）、或异常消息（无 _getType / 返回 undefined）会抛错并导致记忆/QA 子流程失败。
    * @param {import('@langchain/core/messages').BaseMessage[]} messages
    * @returns {import('@langchain/core/messages').BaseMessage[]}
@@ -692,22 +762,28 @@ class AgentClient extends BaseClient {
       if (this.processMemory == null) {
         return;
       }
+      /** Snapshot — main agent graph may mutate the same array while this runs in parallel. */
+      const messagesSnapshot = Array.isArray(messages) ? messages.slice() : [];
       const appConfig = this.options.req.config;
       const memoryConfig = appConfig.memory;
       const messageWindowSize = memoryConfig?.messageWindowSize ?? 5;
 
-      let messagesToProcess = [...messages];
-      if (messages.length > messageWindowSize) {
-        for (let i = messages.length - messageWindowSize; i >= 0; i--) {
-          const potentialWindow = messages.slice(i, i + messageWindowSize);
-          if (potentialWindow[0]?.role === 'user') {
+      let messagesToProcess = [...messagesSnapshot];
+      if (messagesSnapshot.length > messageWindowSize) {
+        for (let i = messagesSnapshot.length - messageWindowSize; i >= 0; i--) {
+          const potentialWindow = messagesSnapshot.slice(i, i + messageWindowSize);
+          const first = potentialWindow[0];
+          const firstType =
+            first != null && typeof first._getType === 'function' ? first._getType() : undefined;
+          /** LangChain HumanMessage uses _getType() === 'human', not role === 'user'. */
+          if (firstType === 'human') {
             messagesToProcess = [...potentialWindow];
             break;
           }
         }
 
-        if (messagesToProcess.length === messages.length) {
-          messagesToProcess = [...messages.slice(-messageWindowSize)];
+        if (messagesToProcess.length === messagesSnapshot.length) {
+          messagesToProcess = [...messagesSnapshot.slice(-messageWindowSize)];
         }
       }
 
@@ -715,11 +791,15 @@ class AgentClient extends BaseClient {
       const safeMessages = this.sanitizeMessagesForBufferString(filteredMessages);
       if (safeMessages.length === 0) {
         logger.debug(
-          '[AgentClient] runMemory: 无可用消息供 getBufferString（可能均为 remove/异常类型），跳过记忆处理',
+          '[AgentClient] runMemory: 无可用消息供对话格式化（可能均为 remove/异常类型），跳过记忆处理',
         );
         return;
       }
-      const bufferString = getBufferString(safeMessages);
+      const bufferString = formatChatHistoryForMemoryBuffer(safeMessages);
+      if (!bufferString.trim()) {
+        logger.debug('[AgentClient] runMemory: 格式化对话为空，跳过记忆处理');
+        return;
+      }
       const bufferMessage = new HumanMessage(`# Current Chat:\n\n${bufferString}`);
       const memoryResult = await this.processMemory([bufferMessage]);
       
@@ -756,6 +836,8 @@ class AgentClient extends BaseClient {
           agent_id: qaExtractorConfig.agent.id,
           endpoint: EModelEndpoint.agents,
         });
+      } else if (qaExtractorConfig.agent?.id != null) {
+        prelimAgent = this.options.agent;
       } else if (
         qaExtractorConfig.agent?.id == null &&
         qaExtractorConfig.agent?.model != null &&
@@ -768,6 +850,14 @@ class AgentClient extends BaseClient {
         '[api/server/controllers/agents/client.js #useQAExtractor] Error loading agent for QA extraction',
         error,
       );
+    }
+
+    if (!prelimAgent) {
+      logger.warn(
+        '[api/server/controllers/agents/client.js #useQAExtractor] No preliminary agent resolved for QA extraction',
+        qaExtractorConfig,
+      );
+      return;
     }
 
     const agent = await initializeAgent({
@@ -851,22 +941,26 @@ class AgentClient extends BaseClient {
       if (this.processQAExtractor == null) {
         return;
       }
+      const messagesSnapshot = Array.isArray(messages) ? messages.slice() : [];
       const appConfig = this.options.req.config;
       const qaExtractorConfig = appConfig.qaExtractor;
       const messageWindowSize = qaExtractorConfig?.messageWindowSize ?? 5;
 
-      let messagesToProcess = [...messages];
-      if (messages.length > messageWindowSize) {
-        for (let i = messages.length - messageWindowSize; i >= 0; i--) {
-          const potentialWindow = messages.slice(i, i + messageWindowSize);
-          if (potentialWindow[0]?.role === 'user') {
+      let messagesToProcess = [...messagesSnapshot];
+      if (messagesSnapshot.length > messageWindowSize) {
+        for (let i = messagesSnapshot.length - messageWindowSize; i >= 0; i--) {
+          const potentialWindow = messagesSnapshot.slice(i, i + messageWindowSize);
+          const first = potentialWindow[0];
+          const firstType =
+            first != null && typeof first._getType === 'function' ? first._getType() : undefined;
+          if (firstType === 'human') {
             messagesToProcess = [...potentialWindow];
             break;
           }
         }
 
-        if (messagesToProcess.length === messages.length) {
-          messagesToProcess = [...messages.slice(-messageWindowSize)];
+        if (messagesToProcess.length === messagesSnapshot.length) {
+          messagesToProcess = [...messagesSnapshot.slice(-messageWindowSize)];
         }
       }
 
@@ -874,11 +968,15 @@ class AgentClient extends BaseClient {
       const safeMessages = this.sanitizeMessagesForBufferString(filteredMessages);
       if (safeMessages.length === 0) {
         logger.debug(
-          '[AgentClient] runQAExtractor: 无可用消息供 getBufferString，跳过 QA 提取',
+          '[AgentClient] runQAExtractor: 无可用消息供对话格式化，跳过 QA 提取',
         );
         return;
       }
-      const bufferString = getBufferString(safeMessages);
+      const bufferString = formatChatHistoryForMemoryBuffer(safeMessages);
+      if (!bufferString.trim()) {
+        logger.debug('[AgentClient] runQAExtractor: 格式化对话为空，跳过 QA 提取');
+        return;
+      }
       const bufferMessage = new HumanMessage(`# Current Chat:\n\n${bufferString}`);
       const qaResult = await this.processQAExtractor([bufferMessage]);
       
@@ -1085,12 +1183,19 @@ class AgentClient extends BaseClient {
       };
 
       const toolSet = new Set((this.options.agent.tools ?? []).map((tool) => tool && tool.name));
-      
-      let { messages: initialMessages, indexTokenCountMap } = formatAgentMessages(
-        payload,
-        this.indexTokenCountMap,
-        toolSet,
-      );
+
+      let {
+        messages: initialMessages,
+        indexTokenCountMap,
+        summary: initialSummary,
+        boundaryTokenAdjustment,
+      } = formatAgentMessages(payload, this.indexTokenCountMap, toolSet);
+
+      if (boundaryTokenAdjustment) {
+        logger.debug(
+          `[AgentClient] Boundary token adjustment: ${boundaryTokenAdjustment.original} → ${boundaryTokenAdjustment.adjusted} (${boundaryTokenAdjustment.remainingChars}/${boundaryTokenAdjustment.totalChars} chars)`,
+        );
+      }
 
       /**
        * @param {BaseMessage[]} messages
@@ -1149,14 +1254,24 @@ class AgentClient extends BaseClient {
         // 并行运行QA提取器
         const qaExtractorPromise = this.runQAExtractor(messages);
 
+        const currentEncoding = this.getEncoding();
+        const prevMeta = this.contextMeta;
+        const encodingMatch = prevMeta?.encoding === currentEncoding;
+        const calibrationRatio =
+          encodingMatch && prevMeta?.calibrationRatio > 0 ? prevMeta.calibrationRatio : undefined;
+
         run = await createRun({
           agents,
+          messages,
           indexTokenCountMap,
+          initialSummary,
+          calibrationRatio,
           runId: this.responseMessageId,
           signal: abortController.signal,
           customHandlers: this.options.eventHandlers,
           requestBody: config.configurable.requestBody,
           user: createSafeUser(this.options.req?.user),
+          summarizationConfig: appConfig?.summarization,
           tokenCounter: createTokenCounter(this.getEncoding()),
         });
 

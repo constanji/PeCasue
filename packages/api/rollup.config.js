@@ -4,9 +4,7 @@ import json from '@rollup/plugin-json';
 import replace from '@rollup/plugin-replace';
 import commonjs from '@rollup/plugin-commonjs';
 import resolve from '@rollup/plugin-node-resolve';
-// Use rollup-plugin-typescript2 which supports check: false to skip type checking
-// This significantly reduces memory usage when processing large dependencies like @because/agents
-import typescript from 'rollup-plugin-typescript2';
+import typescript from '@rollup/plugin-typescript';
 import peerDepsExternal from 'rollup-plugin-peer-deps-external';
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
@@ -19,6 +17,7 @@ const isDevelopment = process.env.NODE_ENV === 'development';
 const plugins = [
   peerDepsExternal(),
   resolve({
+    extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
     preferBuiltins: true,
     skipSelf: true,
   }),
@@ -26,28 +25,21 @@ const plugins = [
     __IS_DEV__: isDevelopment,
     preventAssignment: true,
   }),
+  typescript({
+    tsconfig: './tsconfig.build.json',
+    exclude: ['node_modules/**'],
+    /**
+     * Peer-only packages (e.g. @because/agents) may be absent during workspace install;
+     * still emit JS. Full typecheck is done in CI / editor.
+     */
+    compilerOptions: {
+      noEmitOnError: false,
+      skipLibCheck: true,
+    },
+  }),
   commonjs({
     transformMixedEsModules: true,
     requireReturnsDefault: 'auto',
-  }),
-  typescript({
-    tsconfig: './tsconfig.build.json',
-    useTsconfigDeclarationDir: true,
-    /**
-     * Skip type checking to reduce memory usage when processing large dependencies
-     * Types are validated at compile time, this only affects rollup bundling
-     */
-    check: false,
-    /**
-     * Exclude node_modules from processing to reduce memory footprint
-     * Prevents loading type declarations from dependencies like @because/agents
-     */
-    exclude: ['node_modules/**'],
-    /**
-     * Use cache for faster incremental builds
-     */
-    cacheRoot: './node_modules/.cache/rpt2_cache',
-    clean: true,
   }),
   json(),
 ];

@@ -6,7 +6,6 @@ import {
   BaseMessage,
   HumanMessage,
   SystemMessage,
-  getBufferString,
 } from '@langchain/core/messages';
 import type { MessageContentImageUrl } from '@langchain/core/messages';
 import type { ToolCall } from '@langchain/core/messages/tool';
@@ -14,12 +13,15 @@ import type {
   ExtendedMessageContent,
   MessageContentComplex,
   ReasoningContentText,
+  SummaryContentBlock,
   ToolCallContent,
   ToolCallPart,
   TPayload,
   TMessage,
 } from '@/types';
-import { Providers, ContentTypes } from '@/common';
+import type { RunnableConfig } from '@langchain/core/runnables';
+import { emitAgentLog } from '@/utils/events';
+import { Providers, ContentTypes, Constants } from '@/common';
 
 interface MediaMessageParams {
   message: {
@@ -288,7 +290,12 @@ function formatAssistantMessage(
   let hasReasoning = false;
 
   if (Array.isArray(message.content)) {
-    for (const part of message.content) {
+    for (const part of message.content as Array<
+      MessageContentComplex | undefined | null
+    >) {
+      if (part == null) {
+        continue;
+      }
       if (part.type === ContentTypes.TEXT && part.tool_call_ids) {
         /*
         If there's pending content, it needs to be aggregated as a single string to prepare for tool calls.
@@ -297,7 +304,7 @@ function formatAssistantMessage(
         if (currentContent.length > 0) {
           let content = currentContent.reduce((acc, curr) => {
             if (curr.type === ContentTypes.TEXT) {
-              return `${acc}${curr[ContentTypes.TEXT] || ''}\n`;
+              return `${acc}${String(curr[ContentTypes.TEXT] ?? '')}\n`;
             }
             return acc;
           }, '');
@@ -366,15 +373,27 @@ function formatAssistantMessage(
             content: output != null ? output : '',
           })
         );
-      } else if (part.type === ContentTypes.THINK) {
+      } else if (
+        part.type === ContentTypes.THINK ||
+        part.type === ContentTypes.THINKING ||
+        part.type === ContentTypes.REASONING_CONTENT ||
+        part.type === 'redacted_thinking'
+      ) {
         hasReasoning = true;
         continue;
       } else if (
         part.type === ContentTypes.ERROR ||
-        part.type === ContentTypes.AGENT_UPDATE
+        part.type === ContentTypes.AGENT_UPDATE ||
+        part.type === ContentTypes.SUMMARY
       ) {
         continue;
       } else {
+        if (
+          part.type === ContentTypes.TEXT &&
+          !String(part.text ?? '').trim()
+        ) {
+          continue;
+        }
         currentContent.push(part);
       }
     }
@@ -384,7 +403,7 @@ function formatAssistantMessage(
     const content = currentContent
       .reduce((acc, curr) => {
         if (curr.type === ContentTypes.TEXT) {
-          return `${acc}${curr[ContentTypes.TEXT] || ''}\n`;
+          return `${acc}${String(curr[ContentTypes.TEXT] ?? '')}\n`;
         }
         return acc;
       }, '')
@@ -398,6 +417,17 @@ function formatAssistantMessage(
   }
 
   return formattedMessages;
+}
+
+function getSourceMessageId(message: Partial<TMessage>): string | undefined {
+  const candidate =
+    (message as { messageId?: string }).messageId ??
+    (message as { id?: string }).id;
+  if (typeof candidate !== 'string') {
+    return undefined;
+  }
+  const normalized = candidate.trim();
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 /**
@@ -620,6 +650,153 @@ export const labelContentByAgent = (
   return result;
 };
 
+/** Extracts tool names from a tool_search output JSON string. */
+function extractToolNamesFromSearchOutput(output: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(output);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      Array.isArray((parsed as Record<string, unknown>).tools)
+    ) {
+      return (
+        (parsed as Record<string, unknown>).tools as Array<{ name?: string }>
+      )
+        .map((t) => t.name)
+        .filter((name): name is string => typeof name === 'string');
+    }
+  } catch {
+    /** Output may have warnings prepended, try to find JSON within it */
+    const jsonMatch = output.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed: unknown = JSON.parse(jsonMatch[0]);
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          Array.isArray((parsed as Record<string, unknown>).tools)
+        ) {
+          return (
+            (parsed as Record<string, unknown>).tools as Array<{
+              name?: string;
+            }>
+          )
+            .map((t) => t.name)
+            .filter((name): name is string => typeof name === 'string');
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return [];
+}
+
+type SummaryBoundary = {
+  messageIndex: number;
+  contentIndex: number;
+  text: string;
+  tokenCount: number;
+};
+
+function getLatestSummaryBoundary(
+  payload: TPayload
+): SummaryBoundary | undefined {
+  let summaryBoundary: SummaryBoundary | undefined;
+
+  for (let i = 0; i < payload.length; i++) {
+    const message = payload[i];
+    if (!Array.isArray(message.content)) {
+      continue;
+    }
+
+    for (let j = 0; j < message.content.length; j++) {
+      const part = message.content[j] as MessageContentComplex | undefined;
+      if (part == null || part.type !== ContentTypes.SUMMARY) {
+        continue;
+      }
+
+      const summaryPart = part as Partial<SummaryContentBlock> & {
+        text?: string;
+      };
+
+      // Try content array first (new format), then direct text (legacy format)
+      let summaryText = (summaryPart.content ?? [])
+        .map((block) =>
+          'text' in block ? (block as { text: string }).text : ''
+        )
+        .join('')
+        .trim();
+
+      // Fallback: legacy format where text was a direct field on the block
+      if (summaryText.length === 0 && typeof summaryPart.text === 'string') {
+        summaryText = summaryPart.text.trim();
+      }
+
+      if (summaryText.length === 0) {
+        continue;
+      }
+
+      summaryBoundary = {
+        messageIndex: i,
+        contentIndex: j,
+        text: summaryText,
+        tokenCount:
+          typeof summaryPart.tokenCount === 'number' &&
+          Number.isFinite(summaryPart.tokenCount)
+            ? summaryPart.tokenCount
+            : 0,
+      };
+    }
+  }
+
+  return summaryBoundary;
+}
+
+function applySummaryBoundary(
+  message: Partial<TMessage>,
+  messageIndex: number,
+  summaryBoundary?: SummaryBoundary
+): Partial<TMessage> | null {
+  if (!summaryBoundary) {
+    return message;
+  }
+
+  if (messageIndex < summaryBoundary.messageIndex) {
+    return null;
+  }
+
+  if (
+    messageIndex !== summaryBoundary.messageIndex ||
+    !Array.isArray(message.content)
+  ) {
+    return message;
+  }
+
+  return {
+    ...message,
+    content: message.content.slice(summaryBoundary.contentIndex + 1),
+  };
+}
+
+function contentPartCharLength(part: MessageContentComplex): number {
+  const record = part as Record<string, unknown>;
+  let len = 0;
+  if (typeof record.text === 'string') {
+    len += record.text.length;
+  }
+  if (typeof record.thinking === 'string') {
+    len += record.thinking.length;
+  }
+  const { input } = record;
+  if (typeof input === 'string') {
+    len += input.length;
+  } else if (input != null && typeof input === 'object') {
+    len += JSON.stringify(input).length;
+  }
+  return len;
+}
+
 /**
  * Formats an array of messages for LangChain, handling tool calls and creating ToolMessage instances.
  *
@@ -630,37 +807,85 @@ export const labelContentByAgent = (
  */
 export const formatAgentMessages = (
   payload: TPayload,
-  indexTokenCountMap?: Record<number, number>,
+  indexTokenCountMap?: Record<number, number | undefined>,
   tools?: Set<string>
 ): {
   messages: Array<HumanMessage | AIMessage | SystemMessage | ToolMessage>;
   indexTokenCountMap?: Record<number, number>;
+  /** Cross-run summary extracted from the payload. Should be forwarded to the
+   *  agent run so it can be included in the system message via AgentContext. */
+  summary?: { text: string; tokenCount: number };
+  /** When a summary boundary sliced content from a message, the token count
+   *  was proportionally reduced. Returned so the caller can log it. */
+  boundaryTokenAdjustment?: {
+    original: number;
+    adjusted: number;
+    remainingChars: number;
+    totalChars: number;
+  };
 } => {
   const messages: Array<
     HumanMessage | AIMessage | SystemMessage | ToolMessage
   > = [];
   // If indexTokenCountMap is provided, create a new map to track the updated indices
   const updatedIndexTokenCountMap: Record<number, number> = {};
+  let boundaryTokenAdjustment:
+    | {
+        original: number;
+        adjusted: number;
+        remainingChars: number;
+        totalChars: number;
+      }
+    | undefined;
   // Keep track of the mapping from original payload indices to result indices
-  const indexMapping: Record<number, number[]> = {};
+  const indexMapping: Record<number, number[] | undefined> = {};
+  const summaryBoundary = getLatestSummaryBoundary(payload);
+
+  // Summary metadata is returned to the caller so it can be forwarded to the
+  // agent run and included in the single system message via AgentContext.
+  // We intentionally do NOT create a SystemMessage here — that would conflict
+  // with the agent's own system message (instructions + summary combined).
+
+  /**
+   * Create a mutable copy of the tools set that can be expanded dynamically.
+   * When we encounter tool_search results, we add discovered tools to this set,
+   * making their subsequent tool calls valid.
+   */
+  const discoveredTools = tools ? new Set(tools) : undefined;
 
   // Process messages with tool conversion if tools set is provided
   for (let i = 0; i < payload.length; i++) {
-    const message = payload[i];
+    const rawMessage = payload[i];
+    const sourceMessageId = getSourceMessageId(rawMessage);
+    let message = applySummaryBoundary(rawMessage, i, summaryBoundary);
+    if (!message) {
+      indexMapping[i] = [];
+      continue;
+    }
+
     // Q: Store the current length of messages to track where this payload message starts in the result?
     // const startIndex = messages.length;
     if (typeof message.content === 'string') {
-      message.content = [
-        { type: ContentTypes.TEXT, [ContentTypes.TEXT]: message.content },
-      ];
+      message = {
+        ...message,
+        content: [
+          { type: ContentTypes.TEXT, [ContentTypes.TEXT]: message.content },
+        ],
+      };
+    } else if (Array.isArray(message.content) && message.content.length === 0) {
+      indexMapping[i] = [];
+      continue;
     }
+
     if (message.role !== 'assistant') {
-      messages.push(
-        formatMessage({
-          message: message as MessageInput,
-          langChain: true,
-        }) as HumanMessage | AIMessage | SystemMessage
-      );
+      const formattedMessage = formatMessage({
+        message: message as MessageInput,
+        langChain: true,
+      }) as HumanMessage | AIMessage | SystemMessage;
+      if (sourceMessageId != null && sourceMessageId !== '') {
+        formattedMessage.id = sourceMessageId;
+      }
+      messages.push(formattedMessage);
 
       // Update the index mapping for this message
       indexMapping[i] = [messages.length - 1];
@@ -670,96 +895,144 @@ export const formatAgentMessages = (
     // For assistant messages, track the starting index before processing
     const startMessageIndex = messages.length;
 
-    // If tools set is provided, we need to check if we need to convert tool messages to a string
-    if (tools) {
-      // First, check if this message contains tool calls
-      let hasToolCalls = false;
-      let hasInvalidTool = false;
-      const toolNames: string[] = [];
-
+    /**
+     * If tools set is provided, process tool_calls:
+     * - Keep valid tool_calls (tools in the set or dynamically discovered)
+     * - Convert invalid tool_calls to string representation for context preservation
+     * - Dynamically expand the set when tool_search results are encountered
+     */
+    let processedMessage = message;
+    if (discoveredTools) {
       const content = message.content;
-      if (content && Array.isArray(content)) {
+      if (content != null && Array.isArray(content)) {
+        const filteredContent: typeof content = [];
+        const invalidToolCallIds = new Set<string>();
+        const invalidToolStrings: string[] = [];
+
         for (const part of content) {
-          if (part.type === ContentTypes.TOOL_CALL) {
-            hasToolCalls = true;
-            if (tools.size === 0) {
-              hasInvalidTool = true;
-              break;
-            }
-            // Protect against malformed tool call entries
+          if (part.type !== ContentTypes.TOOL_CALL) {
+            filteredContent.push(part);
+            continue;
+          }
+
+          /** Skip malformed tool_call entries */
+          if (
+            part.tool_call == null ||
+            part.tool_call.name == null ||
+            part.tool_call.name === ''
+          ) {
             if (
-              part.tool_call == null ||
-              part.tool_call.name == null ||
-              part.tool_call.name === ''
+              typeof part.tool_call?.id === 'string' &&
+              part.tool_call.id !== ''
             ) {
-              hasInvalidTool = true;
-              continue;
+              invalidToolCallIds.add(part.tool_call.id);
             }
-            const toolName = part.tool_call.name;
-            toolNames.push(toolName);
-            if (!tools.has(toolName)) {
-              hasInvalidTool = true;
+            continue;
+          }
+
+          const toolName = part.tool_call.name;
+
+          /**
+           * If this is a tool_search result with output, extract discovered tool names
+           * and add them to the discoveredTools set for subsequent validation.
+           */
+          if (
+            toolName === Constants.TOOL_SEARCH &&
+            typeof part.tool_call.output === 'string' &&
+            part.tool_call.output !== ''
+          ) {
+            const extracted = extractToolNamesFromSearchOutput(
+              part.tool_call.output
+            );
+            for (const name of extracted) {
+              discoveredTools.add(name);
             }
           }
+
+          if (discoveredTools.has(toolName)) {
+            /** Valid tool - keep it */
+            filteredContent.push(part);
+          } else {
+            /** Invalid tool - convert to string for context preservation */
+            if (
+              typeof part.tool_call.id === 'string' &&
+              part.tool_call.id !== ''
+            ) {
+              invalidToolCallIds.add(part.tool_call.id);
+            }
+            const output = part.tool_call.output ?? '';
+            invalidToolStrings.push(`Tool: ${toolName}, ${output}`);
+          }
         }
-      }
 
-      // If this message has tool calls and at least one is invalid, we need to convert it
-      if (hasToolCalls && hasInvalidTool) {
-        // We need to collect all related messages (this message and any subsequent tool messages)
-        const toolSequence: BaseMessage[] = [];
-        let sequenceEndIndex = i;
-
-        // Process the current assistant message to get the AIMessage with tool calls
-        const formattedMessages = formatAssistantMessage(message);
-        toolSequence.push(...formattedMessages);
-
-        // Look ahead for any subsequent assistant messages that might be part of this tool sequence
-        let j = i + 1;
-        while (j < payload.length && payload[j].role === 'assistant') {
-          // Check if this is a continuation of the tool sequence
-          let isToolResponse = false;
-          const content = payload[j].content;
-          if (content != null && Array.isArray(content)) {
-            for (const part of content) {
-              if (part.type === ContentTypes.TOOL_CALL) {
-                isToolResponse = true;
-                break;
+        /** Remove tool_call_ids references to invalid tools from text parts */
+        if (invalidToolCallIds.size > 0) {
+          for (const part of filteredContent) {
+            if (
+              part.type === ContentTypes.TEXT &&
+              Array.isArray(part.tool_call_ids)
+            ) {
+              part.tool_call_ids = part.tool_call_ids.filter(
+                (id: string) => !invalidToolCallIds.has(id)
+              );
+              if (part.tool_call_ids.length === 0) {
+                delete part.tool_call_ids;
               }
             }
           }
+        }
 
-          if (isToolResponse) {
-            // This is part of the tool sequence, add it
-            const nextMessages = formatAssistantMessage(payload[j]);
-            toolSequence.push(...nextMessages);
-            sequenceEndIndex = j;
-            j++;
+        /** Append invalid tool strings to the content for context preservation */
+        if (invalidToolStrings.length > 0) {
+          /** Find the last text part or create one */
+          let lastTextPartIndex = -1;
+          for (let j = filteredContent.length - 1; j >= 0; j--) {
+            if (filteredContent[j].type === ContentTypes.TEXT) {
+              lastTextPartIndex = j;
+              break;
+            }
+          }
+
+          const invalidToolText = invalidToolStrings.join('\n');
+          if (lastTextPartIndex >= 0) {
+            const lastTextPart = filteredContent[lastTextPartIndex] as {
+              type: string;
+              [ContentTypes.TEXT]?: string;
+              text?: string;
+            };
+            const existingText =
+              lastTextPart[ContentTypes.TEXT] ?? lastTextPart.text ?? '';
+            filteredContent[lastTextPartIndex] = {
+              ...lastTextPart,
+              [ContentTypes.TEXT]: existingText
+                ? `${existingText}\n${invalidToolText}`
+                : invalidToolText,
+            };
           } else {
-            // This is not part of the tool sequence, stop looking
-            break;
+            /** No text part exists, create one */
+            filteredContent.push({
+              type: ContentTypes.TEXT,
+              [ContentTypes.TEXT]: invalidToolText,
+            });
           }
         }
 
-        // Convert the sequence to a string
-        const bufferString = getBufferString(toolSequence);
-        messages.push(new AIMessage({ content: bufferString }));
-
-        // Skip the messages we've already processed
-        i = sequenceEndIndex;
-
-        // Update the index mapping for this sequence
-        const resultIndices = [messages.length - 1];
-        for (let k = i; k >= i && k <= sequenceEndIndex; k++) {
-          indexMapping[k] = resultIndices;
+        /** Use filtered content if we made any changes */
+        if (
+          filteredContent.length !== content.length ||
+          invalidToolStrings.length > 0
+        ) {
+          processedMessage = { ...message, content: filteredContent };
         }
-
-        continue;
       }
     }
 
-    // Process the assistant message using the helper function
-    const formattedMessages = formatAssistantMessage(message);
+    const formattedMessages = formatAssistantMessage(processedMessage);
+    if (sourceMessageId != null && sourceMessageId !== '') {
+      for (const formattedMessage of formattedMessages) {
+        formattedMessage.id = sourceMessageId;
+      }
+    }
     messages.push(...formattedMessages);
 
     // Update the index mapping for this assistant message
@@ -772,7 +1045,6 @@ export const formatAgentMessages = (
     indexMapping[i] = resultIndices;
   }
 
-  // Update the token count map if it was provided
   if (indexTokenCountMap) {
     for (
       let originalIndex = 0;
@@ -780,26 +1052,113 @@ export const formatAgentMessages = (
       originalIndex++
     ) {
       const resultIndices = indexMapping[originalIndex] || [];
-      const tokenCount = indexTokenCountMap[originalIndex];
+      let tokenCount = indexTokenCountMap[originalIndex];
 
-      if (tokenCount !== undefined) {
-        if (resultIndices.length === 1) {
-          // Simple 1:1 mapping
-          updatedIndexTokenCountMap[resultIndices[0]] = tokenCount;
-        } else if (resultIndices.length > 1) {
-          // If one message was split into multiple, distribute the token count
-          // This is a simplification - in reality, you might want a more sophisticated distribution
-          const countPerMessage = Math.floor(tokenCount / resultIndices.length);
-          resultIndices.forEach((resultIndex, idx) => {
-            if (idx === resultIndices.length - 1) {
-              // Give any remainder to the last message
-              updatedIndexTokenCountMap[resultIndex] =
-                tokenCount - countPerMessage * (resultIndices.length - 1);
-            } else {
-              updatedIndexTokenCountMap[resultIndex] = countPerMessage;
+      if (tokenCount === undefined) {
+        continue;
+      }
+
+      if (
+        summaryBoundary &&
+        originalIndex === summaryBoundary.messageIndex &&
+        Array.isArray(payload[originalIndex].content)
+      ) {
+        const content = payload[originalIndex]
+          .content as MessageContentComplex[];
+        const { contentIndex } = summaryBoundary;
+        if (contentIndex >= 0 && contentIndex < content.length - 1) {
+          let totalCharLen = 0;
+          let remainingCharLen = 0;
+          for (let p = 0; p < content.length; p++) {
+            const charLen = contentPartCharLength(content[p]);
+            totalCharLen += charLen;
+            if (p > contentIndex) {
+              remainingCharLen += charLen;
             }
-          });
+          }
+          if (totalCharLen > 0) {
+            const original = tokenCount;
+            tokenCount = Math.max(
+              1,
+              Math.round(tokenCount * (remainingCharLen / totalCharLen))
+            );
+            boundaryTokenAdjustment = {
+              original,
+              adjusted: tokenCount,
+              remainingChars: remainingCharLen,
+              totalChars: totalCharLen,
+            };
+          }
         }
+      }
+
+      const msgCount = resultIndices.length;
+      if (msgCount === 1) {
+        updatedIndexTokenCountMap[resultIndices[0]] = tokenCount;
+        continue;
+      }
+
+      if (msgCount < 2) {
+        continue;
+      }
+
+      let totalLength = 0;
+      const lastIdx = msgCount - 1;
+      const lengths = new Array<number>(msgCount);
+      for (let k = 0; k < msgCount; k++) {
+        const msg = messages[resultIndices[k]];
+        const { content } = msg;
+        let len = 0;
+        if (typeof content === 'string') {
+          len = content.length;
+        } else if (Array.isArray(content)) {
+          for (const part of content as Array<
+            Record<string, unknown> | string | undefined
+          >) {
+            if (typeof part === 'string') {
+              len += part.length;
+            } else if (part != null && typeof part === 'object') {
+              const val = part.text ?? part.content;
+              if (typeof val === 'string') {
+                len += val.length;
+              }
+            }
+          }
+        }
+        const toolCalls = (msg as AIMessage).tool_calls;
+        if (Array.isArray(toolCalls)) {
+          for (const tc of toolCalls as Array<Record<string, unknown>>) {
+            if (typeof tc.name === 'string') {
+              len += tc.name.length;
+            }
+            const { args } = tc;
+            if (typeof args === 'string') {
+              len += args.length;
+            } else if (args != null) {
+              len += JSON.stringify(args).length;
+            }
+          }
+        }
+        lengths[k] = len;
+        totalLength += len;
+      }
+
+      if (totalLength === 0) {
+        const countPerMessage = Math.floor(tokenCount / msgCount);
+        for (let k = 0; k < lastIdx; k++) {
+          updatedIndexTokenCountMap[resultIndices[k]] = countPerMessage;
+        }
+        updatedIndexTokenCountMap[resultIndices[lastIdx]] =
+          tokenCount - countPerMessage * lastIdx;
+      } else {
+        let distributed = 0;
+        for (let k = 0; k < lastIdx; k++) {
+          const share = Math.floor((lengths[k] / totalLength) * tokenCount);
+          updatedIndexTokenCountMap[resultIndices[k]] = share;
+          distributed += share;
+        }
+        updatedIndexTokenCountMap[resultIndices[lastIdx]] =
+          tokenCount - distributed;
       }
     }
   }
@@ -809,6 +1168,10 @@ export const formatAgentMessages = (
     indexTokenCountMap: indexTokenCountMap
       ? updatedIndexTokenCountMap
       : undefined,
+    summary: summaryBoundary
+      ? { text: summaryBoundary.text, tokenCount: summaryBoundary.tokenCount }
+      : undefined,
+    boundaryTokenAdjustment,
   };
 };
 
@@ -837,6 +1200,113 @@ export function shiftIndexTokenCountMap(
   return shiftedMap;
 }
 
+/** Block types that contain binary image data and must be preserved structurally. */
+const IMAGE_BLOCK_TYPES = new Set(['image_url', 'image']);
+
+/** Checks whether a BaseMessage is a tool-role message. */
+const isToolMessage = (m: BaseMessage): boolean =>
+  m instanceof ToolMessage || ('role' in m && (m as any).role === 'tool');
+
+/** Flushes accumulated text chunks into `parts` as a single text block. */
+function flushTextChunks(
+  textChunks: string[],
+  parts: MessageContentComplex[]
+): void {
+  if (textChunks.length === 0) {
+    return;
+  }
+  parts.push({
+    type: ContentTypes.TEXT,
+    text: textChunks.join('\n'),
+  } as MessageContentComplex);
+  textChunks.length = 0;
+}
+
+/**
+ * Appends a single message's content to the running `textChunks` / `parts`
+ * accumulators.  Image blocks are shallow-copied into `parts` as-is so that
+ * binary data (base64 images) never becomes text tokens.  All other block
+ * types are serialized to text — unrecognized types are JSON-serialized
+ * rather than silently dropped.
+ *
+ * When `content` is an array containing tool_use blocks, `tool_calls` is NOT
+ * additionally serialized (avoiding double output).  `tool_calls` is used as
+ * a fallback when `content` is a plain string or an array with no tool_use.
+ */
+function appendMessageContent(
+  msg: BaseMessage,
+  role: string,
+  textChunks: string[],
+  parts: MessageContentComplex[]
+): void {
+  const { content } = msg;
+
+  if (typeof content === 'string') {
+    if (content) {
+      textChunks.push(`${role}: ${content}`);
+    }
+    appendToolCalls(msg, role, textChunks);
+    return;
+  }
+
+  if (!Array.isArray(content)) {
+    appendToolCalls(msg, role, textChunks);
+    return;
+  }
+
+  let hasToolUseBlock = false;
+
+  for (const block of content as ExtendedMessageContent[]) {
+    if (IMAGE_BLOCK_TYPES.has(block.type ?? '')) {
+      flushTextChunks(textChunks, parts);
+      parts.push({ ...block } as MessageContentComplex);
+      continue;
+    }
+
+    if (block.type === 'tool_use') {
+      hasToolUseBlock = true;
+      textChunks.push(
+        `${role}: [tool_use] ${String(block.name ?? '')} ${JSON.stringify(block.input ?? {})}`
+      );
+      continue;
+    }
+
+    const text = block.text ?? block.input;
+    if (typeof text === 'string' && text) {
+      textChunks.push(`${role}: ${text}`);
+      continue;
+    }
+
+    // Fallback: serialize unrecognized block types to preserve context
+    if (block.type != null && block.type !== '') {
+      textChunks.push(`${role}: [${block.type}] ${JSON.stringify(block)}`);
+    }
+  }
+
+  // If content array had no tool_use blocks, fall back to tool_calls metadata
+  // (handles edge case: empty content array with tool_calls populated)
+  if (!hasToolUseBlock) {
+    appendToolCalls(msg, role, textChunks);
+  }
+}
+
+function appendToolCalls(
+  msg: BaseMessage,
+  role: string,
+  textChunks: string[]
+): void {
+  if (role !== 'AI') {
+    return;
+  }
+  const aiMsg = msg as AIMessage;
+  if (!aiMsg.tool_calls || aiMsg.tool_calls.length === 0) {
+    return;
+  }
+  for (const tc of aiMsg.tool_calls) {
+    textChunks.push(`AI: [tool_call] ${tc.name}(${JSON.stringify(tc.args)})`);
+  }
+}
+
 /**
  * Ensures compatibility when switching from a non-thinking agent to a thinking-enabled agent.
  * Converts AI messages with tool calls (that lack thinking/reasoning blocks) into buffer strings,
@@ -850,18 +1320,48 @@ export function shiftIndexTokenCountMap(
  *
  * @param messages - Array of messages to process
  * @param provider - The provider being used (unused but kept for future compatibility)
+ * @param config - Optional RunnableConfig for structured agent logging
  * @returns The messages array with tool sequences converted to buffer strings if necessary
  */
 export function ensureThinkingBlockInMessages(
   messages: BaseMessage[],
-  _provider: Providers
+  _provider: Providers,
+  config?: RunnableConfig
 ): BaseMessage[] {
-  const result: BaseMessage[] = [];
-  let i = 0;
+  if (messages.length === 0) {
+    return messages;
+  }
+
+  // Find the last HumanMessage. Only the trailing sequence after it needs
+  // validation — earlier messages are history already accepted by the provider.
+  let lastHumanIndex = -1;
+  for (let k = messages.length - 1; k >= 0; k--) {
+    const m = messages[k];
+    if (
+      m instanceof HumanMessage ||
+      ('role' in m && (m as any).role === 'user')
+    ) {
+      lastHumanIndex = k;
+      break;
+    }
+  }
+
+  if (lastHumanIndex === messages.length - 1) {
+    return messages;
+  }
+
+  const result: BaseMessage[] =
+    lastHumanIndex >= 0 ? messages.slice(0, lastHumanIndex + 1) : [];
+  let i = lastHumanIndex + 1;
 
   while (i < messages.length) {
     const msg = messages[i];
-    const isAI = msg instanceof AIMessage || msg instanceof AIMessageChunk;
+    /** Detect AI messages by instanceof OR by role, in case cache-control cloning
+     produced a plain object that lost the LangChain prototype. */
+    const isAI =
+      msg instanceof AIMessage ||
+      msg instanceof AIMessageChunk ||
+      ('role' in msg && (msg as any).role === 'assistant');
 
     if (!isAI) {
       result.push(msg);
@@ -875,44 +1375,76 @@ export function ensureThinkingBlockInMessages(
 
     // Check if the message has tool calls or tool_use content
     let hasToolUse = hasToolCalls ?? false;
-    let firstContentType: string | undefined;
+    let hasThinkingBlock = false;
 
     if (contentIsArray && aiMsg.content.length > 0) {
-      const content = aiMsg.content as ExtendedMessageContent[];
-      firstContentType = content[0]?.type;
-      hasToolUse =
-        hasToolUse ||
-        content.some((c) => typeof c === 'object' && c.type === 'tool_use');
+      for (const c of aiMsg.content as ExtendedMessageContent[]) {
+        if (typeof c !== 'object') {
+          continue;
+        }
+        if (c.type === 'tool_use') {
+          hasToolUse = true;
+        } else if (
+          c.type === ContentTypes.THINKING ||
+          c.type === ContentTypes.REASONING_CONTENT ||
+          c.type === ContentTypes.REASONING ||
+          c.type === 'redacted_thinking'
+        ) {
+          hasThinkingBlock = true;
+        }
+        if (hasToolUse && hasThinkingBlock) {
+          break;
+        }
+      }
     }
 
-    // If message has tool use but no thinking block, convert to buffer string
+    // Bedrock also stores reasoning in additional_kwargs (may not be in content array)
     if (
-      hasToolUse &&
-      firstContentType !== ContentTypes.THINKING &&
-      firstContentType !== ContentTypes.REASONING_CONTENT &&
-      firstContentType !== ContentTypes.REASONING &&
-      firstContentType !== 'redacted_thinking'
+      !hasThinkingBlock &&
+      aiMsg.additional_kwargs.reasoning_content != null
     ) {
-      // Collect the AI message and any following tool messages
-      const toolSequence: BaseMessage[] = [msg];
-      let j = i + 1;
+      hasThinkingBlock = true;
+    }
 
-      // Look ahead for tool messages that belong to this AI message
-      while (j < messages.length && messages[j] instanceof ToolMessage) {
-        toolSequence.push(messages[j]);
+    // If message has tool use but no thinking block, check whether this is a
+    // continuation of a thinking-enabled agent's chain before converting.
+    // Bedrock reasoning models can produce multiple AI→Tool rounds after an
+    // initial reasoning response: the first AI message has reasoning_content,
+    // but follow-ups have content: "" with only tool_calls. These are the
+    // same agent's turn and must NOT be converted to HumanMessages.
+    if (hasToolUse && !hasThinkingBlock) {
+      // Walk backwards — if an earlier AI message in the same chain (before
+      // the nearest HumanMessage) has a thinking/reasoning block, this is a
+      // continuation of a thinking-enabled turn, not a non-thinking handoff.
+      if (chainHasThinkingBlock(messages, i)) {
+        result.push(msg);
+        i++;
+        continue;
+      }
+
+      // Build structured content in a single pass over the AI + following
+      // ToolMessages — preserves image blocks as-is to avoid serializing
+      // binary data as text (which caused 174× token amplification).
+      const parts: MessageContentComplex[] = [];
+      const textChunks: string[] = ['[Previous agent context]'];
+
+      appendMessageContent(msg, 'AI', textChunks, parts);
+
+      let j = i + 1;
+      while (j < messages.length && isToolMessage(messages[j])) {
+        appendMessageContent(messages[j], 'Tool', textChunks, parts);
         j++;
       }
 
-      // Convert the sequence to a buffer string and wrap in a HumanMessage
-      // This avoids the thinking block requirement which only applies to AI messages
-      const bufferString = getBufferString(toolSequence);
-      result.push(
-        new HumanMessage({
-          content: `[Previous agent context]\n${bufferString}`,
-        })
+      flushTextChunks(textChunks, parts);
+      emitAgentLog(
+        config,
+        'warn',
+        'format',
+        'ensureThinkingBlockInMessages: injecting [Previous agent context] HumanMessage' +
+          ` (${parts.length} msgs at index ${i}, no thinking block in chain)`
       );
-
-      // Skip the messages we've processed
+      result.push(new HumanMessage({ content: parts }));
       i = j;
     } else {
       // Keep the message as is
@@ -922,4 +1454,67 @@ export function ensureThinkingBlockInMessages(
   }
 
   return result;
+}
+
+/**
+ * Walks backwards from `currentIndex` through the message array to check
+ * whether an earlier AI message in the same "chain" (no HumanMessage boundary)
+ * contains a thinking/reasoning block.
+ *
+ * A "chain" is a contiguous sequence of AI + Tool messages with no intervening
+ * HumanMessage. Bedrock reasoning models produce reasoning on the first AI
+ * response, then issue follow-up tool calls with `content: ""` and no
+ * reasoning block. These follow-ups are part of the same thinking-enabled
+ * turn and should not be converted.
+ */
+function chainHasThinkingBlock(
+  messages: BaseMessage[],
+  currentIndex: number
+): boolean {
+  for (let k = currentIndex - 1; k >= 0; k--) {
+    const prev = messages[k];
+
+    // HumanMessage = turn boundary — stop searching
+    if (
+      prev instanceof HumanMessage ||
+      ('role' in prev && (prev as any).role === 'user')
+    ) {
+      return false;
+    }
+
+    // Check AI messages for thinking/reasoning blocks
+    const isPrevAI =
+      prev instanceof AIMessage ||
+      prev instanceof AIMessageChunk ||
+      ('role' in prev && (prev as any).role === 'assistant');
+
+    if (isPrevAI) {
+      const prevAiMsg = prev as AIMessage | AIMessageChunk;
+
+      if (Array.isArray(prevAiMsg.content) && prevAiMsg.content.length > 0) {
+        const content = prevAiMsg.content as ExtendedMessageContent[];
+        if (
+          content.some(
+            (c) =>
+              typeof c === 'object' &&
+              (c.type === ContentTypes.THINKING ||
+                c.type === ContentTypes.REASONING_CONTENT ||
+                c.type === ContentTypes.REASONING ||
+                c.type === 'redacted_thinking')
+          )
+        ) {
+          return true;
+        }
+      }
+
+      // Bedrock also stores reasoning in additional_kwargs
+      if (prevAiMsg.additional_kwargs.reasoning_content != null) {
+        return true;
+      }
+    }
+
+    // ToolMessages are part of the chain — keep walking back
+  }
+
+  return false;
 }

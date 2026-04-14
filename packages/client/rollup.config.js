@@ -6,7 +6,7 @@ import postcss from 'rollup-plugin-postcss';
 import replace from '@rollup/plugin-replace';
 import commonjs from '@rollup/plugin-commonjs';
 import resolve from '@rollup/plugin-node-resolve';
-import typescript from 'rollup-plugin-typescript2';
+import typescript from '@rollup/plugin-typescript';
 import { dirname, resolve as pathResolve } from 'path';
 import peerDepsExternal from 'rollup-plugin-peer-deps-external';
 import pkg from './package.json';
@@ -28,6 +28,11 @@ const plugins = [
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
     preventAssignment: true,
   }),
+  // TypeScript must run before commonjs/postcss so .ts is not parsed as plain JS
+  typescript({
+    tsconfig: './tsconfig.json',
+    sourceMap: true,
+  }),
   commonjs(),
   postcss({
     extract: false,
@@ -37,12 +42,6 @@ const plugins = [
     config: {
       path: './postcss.config.js',
     },
-  }),
-  typescript({
-    tsconfig: './tsconfig.json',
-    useTsconfigDeclarationDir: true,
-    clean: true,
-    check: false,
   }),
   terser({
     compress: {

@@ -1,5 +1,5 @@
 import type { TFile } from './types/files';
-import type { TMessage } from './types';
+import type { TMessage } from './global-types';
 
 export type ParentMessage = TMessage & { children: TMessage[]; depth: number };
 export function buildTree({
