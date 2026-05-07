@@ -302,7 +302,7 @@ docker-compose exec api node -e "console.log(require('./BeCauseSkills'))"
 ##### 4. 数据持久化
 
 确保以下目录已正确挂载（在 `docker-compose.yml` 中配置）：
-- `./data-node` - MongoDB 数据目录
+- `./data-node-pecause` - MongoDB 数据目录
 - `./meili_data_v1.12` - Meilisearch 数据目录
 - `./logs` - 应用日志目录
 - `./uploads` - 用户上传文件目录
@@ -360,7 +360,6 @@ docker system prune -a
    
 
 ---
-
 
 
 

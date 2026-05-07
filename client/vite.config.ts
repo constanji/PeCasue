@@ -8,7 +8,10 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vitejs.dev/config/
-const backendPort = process.env.BACKEND_PORT && Number(process.env.BACKEND_PORT) || 1245;
+const backendPort =
+  (process.env.VITE_BACKEND_PORT && Number(process.env.VITE_BACKEND_PORT)) ||
+  (process.env.BACKEND_PORT && Number(process.env.BACKEND_PORT)) ||
+  1245;
 const backendURL = process.env.HOST ? `http://${process.env.HOST}:${backendPort}` : `http://localhost:${backendPort}`;
 
 export default defineConfig(({ command }) => ({
@@ -16,7 +19,7 @@ export default defineConfig(({ command }) => ({
   server: {
     allowedHosts: process.env.VITE_ALLOWED_HOSTS && process.env.VITE_ALLOWED_HOSTS.split(',') || [],
     host: process.env.HOST || 'localhost',
-    port: process.env.PORT && Number(process.env.PORT) || 4614,
+    port: (process.env.VITE_DEV_PORT && Number(process.env.VITE_DEV_PORT)) || 4614,
     strictPort: false,
     proxy: {
       '/api': {

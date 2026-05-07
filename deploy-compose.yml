@@ -65,7 +65,7 @@ services:
     networks:
       - pecause-network
     volumes:
-      - ./data-node:/data/db
+      - ./data-node-pecause:/data/db
     command: mongod --noauth --bind_ip_all
   # meilisearch:  # 已禁用MeiliSearch服务
   #   container_name: pecause-meilisearch

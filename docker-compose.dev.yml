@@ -99,7 +99,7 @@ services:
     ports:
       - "27044:27017"
     volumes:
-      - ./data-node:/data/db
+      - ./data-node-pecause:/data/db
     command: mongod --noauth --port 27017 --bind_ip_all
 
   # Meilisearch 搜索服务

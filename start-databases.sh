@@ -22,7 +22,7 @@ echo -e "${BLUE}================================${NC}\n"
 echo -e "${YELLOW}🛡️  数据安全保护${NC}"
 echo -e "${YELLOW}----------------${NC}"
 
-MONGODB_DATA_DIR="./data-node"
+MONGODB_DATA_DIR="./data-node-pecause"
 if [ -d "$MONGODB_DATA_DIR" ]; then
     MONGODB_DATA_SIZE=$(du -sh "$MONGODB_DATA_DIR" 2>/dev/null | awk '{print $1}')
     echo -e "${GREEN}✅ MongoDB数据目录: $MONGODB_DATA_DIR (大小: ${MONGODB_DATA_SIZE:-0M})${NC}"
@@ -41,7 +41,7 @@ echo -e "${BLUE}📊 步骤1: 启动 MongoDB (端口 27043)${NC}"
 echo -e "${BLUE}----------------${NC}"
 
 # 检查MongoDB是否已在运行
-MONGODB_PID=$(pgrep -f "mongod --dbpath ./data-node --port 27043" 2>/dev/null || echo "")
+MONGODB_PID=$(pgrep -f "mongod --dbpath ./data-node-pecause --port 27043" 2>/dev/null || echo "")
 if [ -n "$MONGODB_PID" ]; then
     echo -e "${YELLOW}⚠️  MongoDB已在运行 (PID: $MONGODB_PID)${NC}"
     
@@ -59,7 +59,7 @@ fi
 # 如果MongoDB未运行，启动它
 if [ -z "$MONGODB_PID" ]; then
     echo "正在启动MongoDB..."
-    mongod --dbpath ./data-node --port 27043 --bind_ip_all --logpath ./logs/mongodb.log --nounixsocket &
+    mongod --dbpath ./data-node-pecause --port 27043 --bind_ip_all --logpath ./logs/mongodb.log --nounixsocket &
     MONGODB_PID=$!
     echo -e "${GREEN}✅ MongoDB已启动 (PID: $MONGODB_PID)${NC}"
     
@@ -81,10 +81,10 @@ if [ -z "$MONGODB_PID" ]; then
                 echo -e "${YELLOW}正在尝试修复数据库...${NC}"
                 
                 # 尝试修复数据库
-                echo -e "${BLUE}执行修复命令: mongod --dbpath ./data-node --repair --nounixsocket${NC}"
+                echo -e "${BLUE}执行修复命令: mongod --dbpath ./data-node-pecause --repair --nounixsocket${NC}"
                 echo "⏳ 这可能需要几分钟时间，请耐心等待..."
                 
-                REPAIR_OUTPUT=$(mongod --dbpath ./data-node --repair --nounixsocket --logpath ./logs/mongodb-repair.log 2>&1)
+                REPAIR_OUTPUT=$(mongod --dbpath ./data-node-pecause --repair --nounixsocket --logpath ./logs/mongodb-repair.log 2>&1)
                 REPAIR_EXIT_CODE=$?
                 
                 # 显示修复输出的最后几行
@@ -93,7 +93,7 @@ if [ -z "$MONGODB_PID" ]; then
                 if [ $REPAIR_EXIT_CODE -eq 0 ]; then
                     echo -e "${GREEN}✅ 数据库修复完成，重新启动MongoDB...${NC}"
                     # 重新启动 MongoDB
-                    mongod --dbpath ./data-node --port 27043 --bind_ip_all --logpath ./logs/mongodb.log --nounixsocket &
+                    mongod --dbpath ./data-node-pecause --port 27043 --bind_ip_all --logpath ./logs/mongodb.log --nounixsocket &
                     MONGODB_PID=$!
                     sleep 5
                     RETRY_COUNT=0  # 重置重试计数
@@ -101,8 +101,8 @@ if [ -z "$MONGODB_PID" ]; then
                 else
                     echo -e "${RED}❌ 数据库修复失败${NC}"
                     echo -e "${YELLOW}💡 如果修复失败，您可能需要：${NC}"
-                    echo -e "${YELLOW}   1. 备份数据: cp -r ./data-node ./data-node.backup${NC}"
-                    echo -e "${YELLOW}   2. 删除损坏的数据: rm -rf ./data-node/*${NC}"
+                    echo -e "${YELLOW}   1. 备份数据: cp -r ./data-node-pecause ./data-node-pecause.backup${NC}"
+                    echo -e "${YELLOW}   2. 删除损坏的数据: rm -rf ./data-node-pecause/*${NC}"
                     echo -e "${YELLOW}   3. 重新运行此脚本${NC}"
                     exit 1
                 fi
@@ -248,7 +248,7 @@ echo -e "${BLUE}📋 数据库连接信息${NC}"
 echo -e "${BLUE}----------------${NC}"
 echo "MongoDB:"
 echo "  URI: mongodb://localhost:27043/pecauseAi"
-echo "  数据目录: ./data-node"
+echo "  数据目录: ./data-node-pecause"
 echo ""
 echo "VectorDB (PostgreSQL + pgvector):"
 echo "  Host: localhost"

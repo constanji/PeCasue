@@ -17,7 +17,7 @@ echo -e "${BLUE}================================${NC}\n"
 # ==================== 停止 MongoDB ====================
 echo -e "${YELLOW}📊 停止 MongoDB...${NC}"
 
-MONGODB_PID=$(pgrep -f "mongod --dbpath ./data-node --port 27043")
+MONGODB_PID=$(pgrep -f "mongod --dbpath ./data-node-pecause --port 27043")
 if [ -n "$MONGODB_PID" ]; then
     echo "发现MongoDB进程 (PID: $MONGODB_PID)"
     kill "$MONGODB_PID" 2>/dev/null
@@ -26,13 +26,13 @@ if [ -n "$MONGODB_PID" ]; then
     sleep 2
     
     # 检查是否还在运行
-    if pgrep -f "mongod --dbpath ./data-node --port 27043" > /dev/null; then
+    if pgrep -f "mongod --dbpath ./data-node-pecause --port 27043" > /dev/null; then
         echo -e "${YELLOW}⚠️  进程未正常退出，强制终止...${NC}"
         kill -9 "$MONGODB_PID" 2>/dev/null
         sleep 1
     fi
     
-    if ! pgrep -f "mongod --dbpath ./data-node --port 27043" > /dev/null; then
+    if ! pgrep -f "mongod --dbpath ./data-node-pecause --port 27043" > /dev/null; then
         echo -e "${GREEN}✅ MongoDB已停止${NC}"
     else
         echo -e "${RED}❌ MongoDB停止失败${NC}"
@@ -69,7 +69,7 @@ echo -e "${BLUE}🔍 最终状态${NC}"
 echo -e "${BLUE}----------------${NC}"
 
 # 检查MongoDB
-if pgrep -f "mongod --dbpath ./data-node --port 27043" > /dev/null; then
+if pgrep -f "mongod --dbpath ./data-node-pecause --port 27043" > /dev/null; then
     echo -e "${RED}❌ MongoDB: 仍在运行${NC}"
 else
     echo -e "${GREEN}✅ MongoDB: 已停止${NC}"
