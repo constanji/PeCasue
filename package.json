@@ -1,5 +1,5 @@
 {
-  "name": "Because",
+  "name": "PeCause",
   "version": "v0.8.1-rc2",
   "description": "",
   "workspaces": [
@@ -78,14 +78,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/constanji/Because.git"
+    "url": "git+https://github.com/constanji/PeCasue.git"
   },
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/constanji/Because/issues"
+    "url": "https://github.com/constanji/PeCasue/issues"
   },
-  "homepage": "https://github.com/constanji/Because",
+  "homepage": "https://github.com/constanji/PeCasue",
   "devDependencies": {
     "@eslint/compat": "^1.2.6",
     "@eslint/eslintrc": "^3.3.1",

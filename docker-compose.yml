@@ -1,10 +1,10 @@
 #不要直接编辑这个文件。可以编辑 'docker-compose.override.yaml' 文件。
 #参考 `docker-compose.override.yaml.example' 文件获取一些示例配置。
-name: because
+name: pecause
 services:
   api:
     ports:
-      - "${API_PORT:-4080}:3080"
+      - "${API_PORT:-4180}:3080"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -12,7 +12,7 @@ services:
         condition: service_started
     # depends_on:
     #   - rag_api
-    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_REGISTRY_USER:-constanjin}/${IMAGE_PREFIX:-because}:${IMAGE_TAG:-latest}
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_REGISTRY_USER:-constanjin}/${IMAGE_PREFIX:-pecause}:${IMAGE_TAG:-latest}
     restart: always
     user: "${UID:-1000}:${GID:-1000}"
     extra_hosts:
@@ -20,13 +20,13 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=3080
-      - DOMAIN_CLIENT=http://localhost:${API_PORT:-4080}
-      - DOMAIN_SERVER=http://localhost:${API_PORT:-4080}
-      - MONGO_URI=mongodb://Because-MongoDB:27017/BecauseAi
+      - DOMAIN_CLIENT=http://pecause.localhost:${API_PORT:-4180}
+      - DOMAIN_SERVER=http://pecause.localhost:${API_PORT:-4180}
+      - MONGO_URI=mongodb://pecause-mongodb:27017/pecauseAi
       - MEILI_HOST=http://meilisearch:7700
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
       # RAG API 已本地化，使用 ONNX 模型，不再需要外部服务
-      # - RAG_PORT=${RAG_PORT:-9002}
+      # - RAG_PORT=${RAG_PORT:-9102}
       # - RAG_API_URL=http://rag_api:8000
       - BECAUSE_LOG_DIR=/app/api/logs
       - CONFIG_PATH=/app/Because.yaml
@@ -50,7 +50,7 @@ services:
     restart: always
     user: "${UID:-1000}:${GID:-1000}"
     ports:
-    - "${MONGO_PORT:-27033}:27017" 
+    - "${MONGO_PORT:-27043}:27017" 
     volumes:
       - ./data-node:/data/db
     command: mongod --noauth
@@ -64,7 +64,7 @@ services:
     restart: always
     user: "${UID:-1000}:${GID:-1000}"
     ports:
-      - "${MEILI_PORT:-8700}:7700"
+      - "${MEILI_PORT:-8800}:7700"
     environment:
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
       - MEILI_NO_ANALYTICS=true
@@ -73,30 +73,30 @@ services:
   vectordb:
     image: pgvector/pgvector:0.8.0-pg15-trixie
     environment:
-      POSTGRES_DB: mydatabase
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: pecause_vector
+      POSTGRES_USER: pecause_user
+      POSTGRES_PASSWORD: pecause_password
     restart: always
     ports:
       # 暴露端口以便外部访问
       # 格式: "主机端口:容器端口"
       # 容器内端口固定为 5432 (PostgreSQL 默认端口)
-      # 主机端口可通过环境变量 VECTOR_DB_PORT 配置，默认为 5434
-      - "${VECTOR_DB_PORT:-5434}:5432"
+      # 主机端口可通过环境变量 VECTOR_DB_PORT 配置，默认为 5444
+      - "${VECTOR_DB_PORT:-5444}:5432"
     volumes:
       - pgdata2:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U myuser -d mydatabase"]
+      test: ["CMD-SHELL", "pg_isready -U pecause_user -d pecause_vector"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
   # rag_api:
-  #   container_name: Because_Rag_api
+  #   container_name: pecause-rag-api
   #   image: ghcr.io/constanji/because-rag-api-dev-lite:latest
   #   environment:
   #     - DB_HOST=vectordb
-  #     - RAG_PORT=${RAG_PORT:-9000}
+  #     - RAG_PORT=${RAG_PORT:-9100}
   #   restart: always
   #   depends_on:
   #     - vectordb

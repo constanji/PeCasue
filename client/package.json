@@ -19,15 +19,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/constanji/Because.git"
+    "url": "git+https://github.com/constanji/PeCasue.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/constanji/Because/issues"
+    "url": "https://github.com/constanji/PeCasue/issues"
   },
-  "homepage": "https://www.because.com",
+  "homepage": "http://pecause.localhost:4614",
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
     "@ant-design/x": "^2.1.1",

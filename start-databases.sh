@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 SCRIPT_DIR=$(dirname "$(realpath "$0")")
 cd "$SCRIPT_DIR" || exit 1
 
-echo -e "${BLUE}🚀 启动 BeCause 数据库服务${NC}"
+echo -e "${BLUE}🚀 启动 PeCause 数据库服务${NC}"
 echo -e "${BLUE}================================${NC}\n"
 
 # ==================== 数据安全保护 ====================
@@ -37,16 +37,16 @@ mkdir -p logs
 echo ""
 
 # ==================== 检查并启动 MongoDB ====================
-echo -e "${BLUE}📊 步骤1: 启动 MongoDB (端口 27033)${NC}"
+echo -e "${BLUE}📊 步骤1: 启动 MongoDB (端口 27043)${NC}"
 echo -e "${BLUE}----------------${NC}"
 
 # 检查MongoDB是否已在运行
-MONGODB_PID=$(pgrep -f "mongod --dbpath ./data-node --port 27033" 2>/dev/null || echo "")
+MONGODB_PID=$(pgrep -f "mongod --dbpath ./data-node --port 27043" 2>/dev/null || echo "")
 if [ -n "$MONGODB_PID" ]; then
     echo -e "${YELLOW}⚠️  MongoDB已在运行 (PID: $MONGODB_PID)${NC}"
     
     # 验证连接
-    if lsof -i :27033 > /dev/null 2>&1 && mongosh --port 27033 --eval "db.adminCommand('ping')" 2>&1 | grep -q "ok.*1"; then
+    if lsof -i :27043 > /dev/null 2>&1 && mongosh --port 27043 --eval "db.adminCommand('ping')" 2>&1 | grep -q "ok.*1"; then
         echo -e "${GREEN}✅ MongoDB连接正常${NC}"
     else
         echo -e "${RED}❌ MongoDB进程存在但无法连接，正在重启...${NC}"
@@ -59,7 +59,7 @@ fi
 # 如果MongoDB未运行，启动它
 if [ -z "$MONGODB_PID" ]; then
     echo "正在启动MongoDB..."
-    mongod --dbpath ./data-node --port 27033 --bind_ip_all --logpath ./logs/mongodb.log --nounixsocket &
+    mongod --dbpath ./data-node --port 27043 --bind_ip_all --logpath ./logs/mongodb.log --nounixsocket &
     MONGODB_PID=$!
     echo -e "${GREEN}✅ MongoDB已启动 (PID: $MONGODB_PID)${NC}"
     
@@ -93,7 +93,7 @@ if [ -z "$MONGODB_PID" ]; then
                 if [ $REPAIR_EXIT_CODE -eq 0 ]; then
                     echo -e "${GREEN}✅ 数据库修复完成，重新启动MongoDB...${NC}"
                     # 重新启动 MongoDB
-                    mongod --dbpath ./data-node --port 27033 --bind_ip_all --logpath ./logs/mongodb.log --nounixsocket &
+                    mongod --dbpath ./data-node --port 27043 --bind_ip_all --logpath ./logs/mongodb.log --nounixsocket &
                     MONGODB_PID=$!
                     sleep 5
                     RETRY_COUNT=0  # 重置重试计数
@@ -113,9 +113,9 @@ if [ -z "$MONGODB_PID" ]; then
         fi
         
         # 检查端口是否在监听
-        if lsof -i :27033 > /dev/null 2>&1; then
+        if lsof -i :27043 > /dev/null 2>&1; then
             # 尝试使用 mongosh 连接（捕获段错误）
-            if mongosh --port 27033 --eval "db.adminCommand('ping')" 2>&1 | grep -q "ok.*1"; then
+            if mongosh --port 27043 --eval "db.adminCommand('ping')" 2>&1 | grep -q "ok.*1"; then
                 echo -e "${GREEN}✅ MongoDB连接成功${NC}"
                 break
             fi
@@ -134,26 +134,26 @@ if [ -z "$MONGODB_PID" ]; then
 fi
 
 # 检查端口监听
-if lsof -i :27033 > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ MongoDB端口 27033 正在监听${NC}"
+if lsof -i :27043 > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ MongoDB端口 27043 正在监听${NC}"
 else
-    echo -e "${RED}❌ MongoDB端口 27033 未监听${NC}"
+    echo -e "${RED}❌ MongoDB端口 27043 未监听${NC}"
 fi
 
 echo ""
 
 # ==================== 检查并启动 VectorDB ====================
-echo -e "${BLUE}🧠 步骤2: 启动 VectorDB (端口 5434)${NC}"
+echo -e "${BLUE}🧠 步骤2: 启动 VectorDB (端口 5444)${NC}"
 echo -e "${BLUE}----------------${NC}"
 
 # 检查VectorDB容器是否已存在
-VECTORDB_CONTAINER="vectordb-local"
+VECTORDB_CONTAINER="pecause-vectordb-local"
 if docker ps -a --format '{{.Names}}' | grep -q "^${VECTORDB_CONTAINER}$"; then
     if docker ps --format '{{.Names}}' | grep -q "^${VECTORDB_CONTAINER}$"; then
         echo -e "${YELLOW}⚠️  VectorDB容器已在运行${NC}"
         
         # 验证连接
-        if docker exec "$VECTORDB_CONTAINER" pg_isready -U myuser -d mydatabase > /dev/null 2>&1; then
+        if docker exec "$VECTORDB_CONTAINER" pg_isready -U pecause_user -d pecause_vector > /dev/null 2>&1; then
             echo -e "${GREEN}✅ VectorDB连接正常${NC}"
         else
             echo -e "${YELLOW}⚠️  VectorDB容器运行中但未就绪，等待中...${NC}"
@@ -169,18 +169,18 @@ else
     echo "正在创建并启动VectorDB容器..."
     
     # 检查数据卷是否存在
-    if docker volume ls --format '{{.Name}}' | grep -q "^becausechat_pgdata2$"; then
-        echo -e "${GREEN}✅ 发现现有数据卷: becausechat_pgdata2${NC}"
+    if docker volume ls --format '{{.Name}}' | grep -q "^pecause_pgdata2$"; then
+        echo -e "${GREEN}✅ 发现现有数据卷: pecause_pgdata2${NC}"
     else
         echo -e "${YELLOW}⚠️  数据卷不存在，将创建新数据卷${NC}"
     fi
     
     docker run -d --name "$VECTORDB_CONTAINER" \
-      -p 5434:5432 \
-      -e POSTGRES_DB=mydatabase \
-      -e POSTGRES_USER=myuser \
-      -e POSTGRES_PASSWORD=mypassword \
-      -v becausechat_pgdata2:/var/lib/postgresql/data \
+      -p 5444:5432 \
+      -e POSTGRES_DB=pecause_vector \
+      -e POSTGRES_USER=pecause_user \
+      -e POSTGRES_PASSWORD=pecause_password \
+      -v pecause_pgdata2:/var/lib/postgresql/data \
       pgvector/pgvector:0.8.0-pg15-trixie > /dev/null 2>&1
     
     if [ $? -eq 0 ]; then
@@ -199,7 +199,7 @@ fi
 RETRY_COUNT=0
 MAX_RETRIES=10
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if docker exec "$VECTORDB_CONTAINER" pg_isready -U myuser -d mydatabase > /dev/null 2>&1; then
+    if docker exec "$VECTORDB_CONTAINER" pg_isready -U pecause_user -d pecause_vector > /dev/null 2>&1; then
         echo -e "${GREEN}✅ VectorDB连接成功${NC}"
         break
     else
@@ -215,10 +215,10 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
 done
 
 # 检查端口监听
-if lsof -i :5434 > /dev/null 2>&1 || nc -z localhost 5434 2>/dev/null; then
-    echo -e "${GREEN}✅ VectorDB端口 5434 正在监听${NC}"
+if lsof -i :5444 > /dev/null 2>&1 || nc -z localhost 5444 2>/dev/null; then
+    echo -e "${GREEN}✅ VectorDB端口 5444 正在监听${NC}"
 else
-    echo -e "${YELLOW}⚠️  VectorDB端口 5434 可能未监听（容器可能仍在启动中）${NC}"
+    echo -e "${YELLOW}⚠️  VectorDB端口 5444 可能未监听（容器可能仍在启动中）${NC}"
 fi
 
 echo ""
@@ -228,15 +228,15 @@ echo -e "${BLUE}🔍 最终状态检查${NC}"
 echo -e "${BLUE}----------------${NC}"
 
 # MongoDB状态
-if lsof -i :27033 > /dev/null 2>&1 && mongosh --port 27033 --eval "db.adminCommand('ping')" 2>&1 | grep -q "ok.*1"; then
-    echo -e "${GREEN}✅ MongoDB: 运行中 (localhost:27033)${NC}"
+if lsof -i :27043 > /dev/null 2>&1 && mongosh --port 27043 --eval "db.adminCommand('ping')" 2>&1 | grep -q "ok.*1"; then
+    echo -e "${GREEN}✅ MongoDB: 运行中 (localhost:27043)${NC}"
 else
     echo -e "${RED}❌ MongoDB: 未运行${NC}"
 fi
 
 # VectorDB状态
-if docker exec "$VECTORDB_CONTAINER" pg_isready -U myuser -d mydatabase > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ VectorDB: 运行中 (localhost:5434)${NC}"
+if docker exec "$VECTORDB_CONTAINER" pg_isready -U pecause_user -d pecause_vector > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ VectorDB: 运行中 (localhost:5444)${NC}"
 else
     echo -e "${RED}❌ VectorDB: 未运行${NC}"
 fi
@@ -247,15 +247,15 @@ echo ""
 echo -e "${BLUE}📋 数据库连接信息${NC}"
 echo -e "${BLUE}----------------${NC}"
 echo "MongoDB:"
-echo "  URI: mongodb://localhost:27033/BecauseAi"
+echo "  URI: mongodb://localhost:27043/pecauseAi"
 echo "  数据目录: ./data-node"
 echo ""
 echo "VectorDB (PostgreSQL + pgvector):"
 echo "  Host: localhost"
-echo "  Port: 5434"
-echo "  Database: mydatabase"
-echo "  User: myuser"
-echo "  Password: mypassword"
+echo "  Port: 5444"
+echo "  Database: pecause_vector"
+echo "  User: pecause_user"
+echo "  Password: pecause_password"
 echo ""
 
 # ==================== 完成提示 ====================
@@ -271,4 +271,3 @@ echo "   或手动停止:"
 echo "   kill $MONGODB_PID                    # 停止MongoDB"
 echo "   docker stop $VECTORDB_CONTAINER      # 停止VectorDB"
 echo ""
-

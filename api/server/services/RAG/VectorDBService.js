@@ -36,8 +36,8 @@ class VectorDBService {
       if (!isRunningInDocker()) {
         // 在本地开发环境：使用 localhost 和映射的端口
         defaultHost = 'localhost';
-        defaultPort = parseInt(process.env.VECTOR_DB_PORT || process.env.DB_PORT || '5434', 10);
-        logger.debug('[VectorDBService] 检测到本地开发环境，使用 localhost:5434 连接向量数据库');
+        defaultPort = parseInt(process.env.VECTOR_DB_PORT || process.env.DB_PORT || '5444', 10);
+        logger.debug('[VectorDBService] 检测到本地开发环境，使用 localhost:5444 连接向量数据库');
       } else {
         // 在 Docker 容器内：使用容器网络内的主机名
         defaultHost = 'vectordb';
@@ -50,9 +50,9 @@ class VectorDBService {
     this.config = {
       host: process.env.VECTOR_DB_HOST || process.env.DB_HOST || defaultHost,
       port: parseInt(process.env.VECTOR_DB_PORT || process.env.DB_PORT || defaultPort.toString(), 10),
-      database: process.env.VECTOR_DB_NAME || process.env.POSTGRES_DB || 'mydatabase',
-      user: process.env.VECTOR_DB_USER || process.env.POSTGRES_USER || 'myuser',
-      password: process.env.VECTOR_DB_PASSWORD || process.env.POSTGRES_PASSWORD || 'mypassword',
+      database: process.env.VECTOR_DB_NAME || process.env.POSTGRES_DB || 'pecause_vector',
+      user: process.env.VECTOR_DB_USER || process.env.POSTGRES_USER || 'pecause_user',
+      password: process.env.VECTOR_DB_PASSWORD || process.env.POSTGRES_PASSWORD || 'pecause_password',
       embeddingDimension: EMBEDDING_DIMENSION, // 向量维度
     };
     

@@ -4,13 +4,13 @@ services:
   vectordb:
     image: pgvector/pgvector:0.8.0-pg15-trixie
     environment:
-      POSTGRES_DB: mydatabase
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: pecause_vector
+      POSTGRES_USER: pecause_user
+      POSTGRES_PASSWORD: pecause_password
     volumes:
       - pgdata2:/var/lib/postgresql/data
     ports:
-      - "5434:5432"
+      - "5444:5432"
     networks:
       - because_default  # 使用 docker-compose.yml 的默认网络
 
@@ -20,11 +20,11 @@ services:
   #   environment:
   #     - DB_HOST=vectordb
   #     - DB_PORT=5432
-  #     - POSTGRES_DB=mydatabase
-  #     - POSTGRES_USER=myuser
-  #     - POSTGRES_PASSWORD=mypassword
+  #     - POSTGRES_DB=pecause_vector
+  #     - POSTGRES_USER=pecause_user
+  #     - POSTGRES_PASSWORD=pecause_password
   #   ports:
-  #     - "${RAG_PORT:-9002}:8000"
+  #     - "${RAG_PORT:-9102}:8000"
   #   depends_on:
   #     - vectordb
   #   env_file:

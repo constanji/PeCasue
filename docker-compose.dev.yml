@@ -2,7 +2,7 @@
 # 支持热重载，修改代码后自动刷新，无需重新构建镜像
 # 使用方法: docker-compose -f docker-compose.dev.yml up
 
-name: because-dev
+name: pecause-dev
 
 services:
   # 后端开发服务
@@ -10,14 +10,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    container_name: Because-Backend-Dev
+    container_name: pecause-backend-dev
     ports:
-      - "${API_PORT:-1145}:3080"
+      - "${API_PORT:-1245}:3080"
     depends_on:
       - mongodb
       - meilisearch
     networks:
-      - because-dev-network
+      - pecause-dev-network
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
@@ -26,12 +26,12 @@ services:
       - HOST=0.0.0.0
       - PORT=3080
       - NODE_ENV=development
-      - MONGO_URI=mongodb://mongodb:27017/BecauseAi  # 容器内部使用 27017，外部映射到 27034
+      - MONGO_URI=mongodb://mongodb:27017/pecauseAi  # 容器内部使用 27017，外部映射到 27044
       - MEILI_HOST=http://meilisearch:7700
       - BECAUSE_LOG_DIR=/app/api/logs
       - CONFIG_PATH=/app/Because.yaml
-      - DOMAIN_CLIENT=http://localhost:4514
-      - DOMAIN_SERVER=http://localhost:1145
+      - DOMAIN_CLIENT=http://pecause.localhost:4614
+      - DOMAIN_SERVER=http://pecause.localhost:1245
       - ENDPOINTS=agents  # 只启用 agents 标准端点，自定义端点（deepseek、modelscope）会自动加载
     volumes:
       # 挂载源代码以实现热重载
@@ -58,13 +58,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    container_name: Because-Frontend-Dev
+    container_name: pecause-frontend-dev
     ports:
-      - "4514:3090"
+      - "4614:3090"
     depends_on:
       - backend-dev
     networks:
-      - because-dev-network
+      - pecause-dev-network
     env_file:
       - .env
     environment:
@@ -91,26 +91,26 @@ services:
 
   # MongoDB 数据库（与生产环境共享数据）
   mongodb:
-    container_name: because-mongodb-dev
+    container_name: pecause-mongodb-dev
     image: mongo
     restart: unless-stopped
     networks:
-      - because-dev-network
+      - pecause-dev-network
     ports:
-      - "27034:27017"
+      - "27044:27017"
     volumes:
       - ./data-node:/data/db
     command: mongod --noauth --port 27017 --bind_ip_all
 
   # Meilisearch 搜索服务
   meilisearch:
-    container_name: chat-meilisearch-dev
+    container_name: pecause-meilisearch-dev
     image: getmeili/meilisearch:v1.12.3
     restart: unless-stopped
     networks:
-      - because-dev-network
+      - pecause-dev-network
     ports:
-      - "${MEILI_PORT:-8701}:7700"
+      - "${MEILI_PORT:-8801}:7700"
     env_file:
       - .env
     environment:
@@ -121,35 +121,35 @@ services:
 
   # 可选的 VectorDB (如果需要 RAG 功能)
   # vectordb:
-  #   container_name: vectorDB-dev
+  #   container_name: pecause-vectordb-dev
   #   image: pgvector/pgvector:0.8.0-pg15-trixie
   #   environment:
-  #     POSTGRES_DB: mydatabase
-  #     POSTGRES_USER: myuser
-  #     POSTGRES_PASSWORD: mypassword
+  #     POSTGRES_DB: pecause_vector
+  #     POSTGRES_USER: pecause_user
+  #     POSTGRES_PASSWORD: pecause_password
   #   restart: unless-stopped
   #   networks:
-  #     - because-dev-network
+  #     - pecause-dev-network
   #   volumes:
   #     - pgdata2-dev:/var/lib/postgresql/data
 
   # 可选的 RAG API (如果需要 RAG 功能)
   # rag_api:
-  #   container_name: Rag_api-dev
+  #   container_name: pecause-rag-api-dev
   #   image: ghcr.io/constanji/because-rag-api-dev-lite:latest
   #   environment:
   #     - DB_HOST=vectordb
-  #     - RAG_PORT=${RAG_PORT:-9001}
+  #     - RAG_PORT=${RAG_PORT:-9101}
   #   restart: unless-stopped
   #   networks:
-  #     - because-dev-network
+  #     - pecause-dev-network
   #   depends_on:
   #     - vectordb
   #   env_file:
   #     - .env
 
 networks:
-  because-dev-network:
+  pecause-dev-network:
     driver: bridge
 
 volumes:

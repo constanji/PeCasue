@@ -162,8 +162,8 @@
    ```
 
 4. **访问应用**
-   - 前端（开发网关）：`http://localhost:4514`
-   - 后端 API：`http://localhost:1145`
+   - 前端（开发网关）：`http://pecause.localhost:4614`
+   - 后端 API：`http://pecause.localhost:1245`
 
 5. **查看 / 停止服务**
    ```bash
@@ -241,18 +241,18 @@
 6. **验证部署**
    ```bash
    # 检查 API 服务是否正常
-   curl http://localhost:4080/api/health
+   curl http://pecause.localhost:4180/api/health
    
    # 检查 MongoDB
    docker-compose exec mongodb mongosh --eval "db.version()"
    
    # 检查 Meilisearch
-   curl http://localhost:8700/health
+   curl http://localhost:8800/health
    ```
 
 7. **访问应用**
-   - 前端访问：`http://your-server-ip:4080`
-   - API 端点：`http://your-server-ip:4080/api`
+   - 前端访问：`http://your-server-ip:4180`
+   - API 端点：`http://your-server-ip:4180/api`
 
 #### 注意事项
 
@@ -360,7 +360,6 @@ docker system prune -a
    
 
 ---
-
 
 
 
