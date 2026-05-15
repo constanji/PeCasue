@@ -13,8 +13,6 @@ const TraversaalSearch = require('./structured/TraversaalSearch');
 const createOpenAIImageTools = require('./structured/OpenAIImageTools');
 const TavilySearchResults = require('./structured/TavilySearchResults');
 const Speckit = require('./structured/Speckit');
-const SocialMedia = require('./structured/SocialMedia');
-const BaziAstrology = require('./structured/BaziAstrology');
 const DatabaseSchema = require('./structured/DatabaseSchema');
 const SqlExecutor = require('./structured/SqlExecutor');
 const BeCause = require('./structured/BeCause');
@@ -38,8 +36,6 @@ module.exports = {
   TavilySearchResults,
   createOpenAIImageTools,
   Speckit,
-  SocialMedia,
-  BaziAstrology,
   DatabaseSchema,
   SqlExecutor,
   BeCause,

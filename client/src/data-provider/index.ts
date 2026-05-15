@@ -16,3 +16,4 @@ export * from './roles';
 export * from './tags';
 export * from './KnowledgeBase';
 export * from './DataSources';
+export * from './Pipeline';

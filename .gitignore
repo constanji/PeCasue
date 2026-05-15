@@ -44,6 +44,9 @@ client/public/images/
 client/public/main.js
 client/public/main.js.map
 client/public/main.js.LICENSE.txt
+# OnlyOffice / 文档编辑器前端静态资源（第三方体积大，不纳入版本库）
+client/public/sdkjs/
+client/public/web-apps/
 
 # Azure Blob Storage Emulator (Azurite)
 __azurite**
@@ -105,6 +108,11 @@ config.local.ts
 junit.xml
 **/.venv/
 **/venv/
+
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
 
 # docker override file
 docker-compose.override.yaml

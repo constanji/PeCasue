@@ -24,6 +24,7 @@ import AgentBuilder from './AgentBuilder';
 import GlobalConfigManager from './GlobalConfigManager';
 import AssetCenterManager from './AssetCenterManager';
 import Benchmark from './Benchmark';
+import PipelineManager from './PipelineManager';
 import ExcelGenerateDemo from './ExcelGenerateDemo';
 import Result from './Result';
 
@@ -148,6 +149,14 @@ export const router = createBrowserRouter(
             {
               path: 'benchmark',
               element: <Benchmark />,
+            },
+            {
+              path: 'pipeline',
+              element: <PipelineManager />,
+            },
+            {
+              path: 'pipeline/tasks/:taskId',
+              element: <PipelineManager />,
             },
             {
               path: 'excel-demo',

@@ -10,6 +10,7 @@ export * from './Generic';
 export * from './Input';
 export * from './MCP';
 export * from './Messages';
+export * from './Pipeline';
 export * from './Plugins';
 export * from './Prompts';
 export * from './Roles';

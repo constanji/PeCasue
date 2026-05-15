@@ -2,13 +2,13 @@ import { useState, memo } from 'react';
 import { useRecoilState } from 'recoil';
 import { useNavigate } from 'react-router-dom';
 import * as Select from '@ariakit/react/select';
-import { FileText, LogOut, Settings as SettingsIcon, Database, BarChart3 } from 'lucide-react';
+import { FileText, LogOut, Settings as SettingsIcon, Database, BarChart3, Workflow } from 'lucide-react';
 import { LinkIcon, GearIcon, DropdownMenuSeparator, Avatar } from '@because/client';
 import { SystemRoles } from '@because/data-provider';
 import { useGetStartupConfig, useGetUserBalance } from '~/data-provider';
 import FilesView from '~/components/Chat/Input/Files/FilesView';
 import { useAuthContext } from '~/hooks/AuthContext';
-import { useLocalize } from '~/hooks';
+import { useLocalize, usePipelineAccess } from '~/hooks';
 import Settings from './Settings';
 import store from '~/store';
 
@@ -22,8 +22,9 @@ function AccountSettings() {
   });
   const [showSettings, setShowSettings] = useState(false);
   const [showFiles, setShowFiles] = useRecoilState(store.showFiles);
-  
+
   const isAdmin = user?.role === SystemRoles.ADMIN;
+  const { hasAccess: hasPipelineAccess } = usePipelineAccess();
 
   return (
     <Select.SelectProvider>
@@ -118,6 +119,16 @@ function AccountSettings() {
               基准测试
             </Select.SelectItem>
           </>
+        )}
+        {hasPipelineAccess && (
+          <Select.SelectItem
+            value=""
+            onClick={() => navigate('/pipeline')}
+            className="select-item text-sm"
+          >
+            <Workflow className="icon-md" aria-hidden="true" />
+            流水线
+          </Select.SelectItem>
         )}
         <DropdownMenuSeparator />
         <Select.SelectItem

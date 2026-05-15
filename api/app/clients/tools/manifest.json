@@ -175,20 +175,6 @@
     "authConfig": []
   },
   {
-    "name": "spec朋友圈生成",
-    "pluginKey": "social",
-    "description": "朋友圈内容生成工具，根据用户输入使用模板系统生成规范的朋友圈内容。Commands: generate (生成朋友圈内容), templates (列出可用模板), format (格式化内容).",
-    "icon": "📱",
-    "authConfig": []
-  },
-  {
-    "name": "生辰八字/星座分析",
-    "pluginKey": "bazi_astrology",
-    "description": "生辰八字/星座分析工具，根据用户输入使用模板系统生成规范的八字命盘、命理分析和星座分析报告。Commands: generate (生成八字命盘或星座分析报告), analyze (进行八字分析或运势预测), templates (列出可用模板).",
-    "icon": "🔮",
-    "authConfig": []
-  },
-  {
     "name": "BeCause",
     "pluginKey": "because",
     "description": "智能问数（自然语言转SQL）提示词模板系统。Commands: sql-generation (生成SQL), sql-generation-reasoning (生成推理计划), intent-classification (意图分类), data-assistance (数据辅助), misleading-assistance (误导查询处理), scoring (文档评分), hypothetical-questions (假设问题生成), agentic/main-agent (Agentic主代理), agentic/text-to-sql (Agentic文本转SQL), agentic/data-assistance (Agentic数据辅助), agentic/misleading-assistance (Agentic误导查询处理).",

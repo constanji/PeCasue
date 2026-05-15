@@ -1,0 +1,23 @@
+# 敏感与本地覆盖
+.env
+*.pem
+
+# 运行时数据（随部署生成；可不提交）
+images/*
+!images/.gitkeep
+uploads/
+logs/
+pipeline-data/*
+!pipeline-data/.gitkeep
+data-node-pecause/*
+!data-node-pecause/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

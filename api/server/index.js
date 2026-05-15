@@ -146,6 +146,7 @@ const startServer = async () => {
   app.use('/api/mcp', routes.mcp);
   app.use('/api/rag', routes.rag);
   app.use('/api/benchmark', routes.benchmark);
+  app.use('/api/pipeline', routes.pipeline);
 
   app.use(ErrorController);
 

@@ -2,11 +2,12 @@
 # v0.8.1-rc2
 
 # Base for all builds
-# 使用 Debian slim 镜像（自带 glibc，完美支持 onnxruntime-node / @xenova/transformers）
-# 使用标签而不是 SHA256，避免跨平台构建时的网络超时问题
-# 临时使用镜像代理前缀以解决 buildx 网络问题（buildx 不经过 Docker daemon 的镜像加速器）
-# 如果网络正常，可以改回 node:20-bookworm-slim
-FROM docker.m.daocloud.io/library/node:20-bookworm-slim AS base-min
+# buildx 使用独立 builder 容器拉基础镜像，多数情况下不会走你在本机 Docker Desktop 里配置的 Hub 镜像加速，
+# 直连 registry-1.docker.io 时易出现 `auth.docker.io` TLS handshake timeout。
+# 默认使用 DaoCloud 对 library 的镜像（国内通常更稳）；若你环境 DaoCloud 反而超时，请显式改回 Hub：
+#   docker buildx build ... --build-arg NODE_IMAGE=node:20-bookworm-slim
+ARG NODE_IMAGE=docker.m.daocloud.io/library/node:20-bookworm-slim
+FROM ${NODE_IMAGE} AS base-min
 WORKDIR /app
 # 安装构建工具和 Python（用于编译 native 模块如 sharp）
 # 安装 vips 以便 sharp 可以使用系统 libvips，避免下载二进制文件
@@ -53,6 +54,8 @@ RUN set -eux; \
   && rm -rf /var/lib/apt/lists/*
 # sharp 0.33+：可用 SHARP_FORCE_GLOBAL_LIBVIPS 跳过下载
 ENV SHARP_FORCE_GLOBAL_LIBVIPS=1
+# sharp@0.32（@xenova 嵌套）install/libvips.js 读取该 env；勿用 npm config set（npm 10 拒绝未登记键）。
+ENV npm_config_sharp_libvips_binary_host=https://npmmirror.com/mirrors/sharp-libvips
 # sharp 0.32（@xenova/transformers 嵌套依赖）：用 pkg-config 检测 vips-cpp，Debian 多架构 .pc 在 /usr/lib/<triplet>/pkgconfig
 # 默认 PATH 不含该目录 → 检测失败 → 走 GitHub 下载 → 国内易 aborted；显式设置后走「检测到系统 libvips → node-gyp 编译」分支
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/arm-linux-gnueabihf/pkgconfig
@@ -78,6 +81,23 @@ RUN npm config set registry https://registry.npmmirror.com && \
     npm config set fetch-retry-maxtimeout 600000 && \
     npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 15000
+# sharp@0.32（@xenova 嵌套）：install/libvips 若走网络，Node 流式拉取大文件易 aborted；
+# 先用 curl 整块下载到 npm 缓存路径，安装时命中「Using cached …」逻辑（见 sharp install/libvips.js）。
+# 使用 TARGETARCH build arg 避免 $$ 转义在 buildx 中的异常行为
+ARG TARGETARCH=amd64
+RUN set -eux; \
+  ARCH="${TARGETARCH}"; \
+  case "$ARCH" in \
+    amd64) PLAT=linux-x64 ;; \
+    arm64) PLAT=linux-arm64v8 ;; \
+    *) echo "Dockerfile.multi: 请为 $ARCH 增补 sharp-libvips 平台名" >&2; exit 1 ;; \
+  esac; \
+  F="libvips-8.14.5-${PLAT}.tar.br"; \
+  mkdir -p /root/.npm/_libvips; \
+  curl -fSL --connect-timeout 30 --retry 30 --retry-delay 10 --retry-all-errors \
+    --max-time 0 -o "/root/.npm/_libvips/${F}" \
+    "https://cdn.npmmirror.com/binaries/sharp-libvips/v8.14.5/${F}"; \
+  ls -lah "/root/.npm/_libvips/${F}"
 # 配置 node-gyp 使用 Python3（通过环境变量）
 ENV PYTHON=python3
 COPY package*.json ./
@@ -125,11 +145,28 @@ COPY client/package*.json ./client/
 COPY api/package*.json ./api/
 ENV HUSKY=0
 ENV CI=true
+# root workspaces install 体量大，跨境/镜像偶发 ECONNRESET；加长超时并在 shell 层重试
+RUN npm config set registry https://registry.npmmirror.com && \
+    npm config set fetch-retries 15 && \
+    npm config set fetch-retry-maxtimeout 600000 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-timeout 600000 || true
 # 使用 npm install --legacy-peer-deps 替代 npm ci，解决 @langchain/core 版本冲突
 # @because/api 需要 @langchain/core@^1.0.0，但其他包需要 0.3.x
 # npm ci 不支持 --legacy-peer-deps，必须使用 npm install
 # 安装所有工作区的依赖（包括 client 的所有依赖）
-RUN npm install --legacy-peer-deps
+RUN set -eux; \
+  attempt=1; \
+  max=5; \
+  while [ "$attempt" -le "$max" ]; do \
+    if npm install --legacy-peer-deps --no-audit --no-fund; then \
+      exit 0; \
+    fi; \
+    echo "npm install failed (attempt $attempt/$max), retry in 60s..."; \
+    attempt=$((attempt + 1)); \
+    sleep 60; \
+  done; \
+  exit 1
 
 # Base stage with dependencies installed
 FROM base-deps AS base
@@ -137,10 +174,12 @@ WORKDIR /app
 
 # Build `data-provider` package
 # 继承 base-deps 确保有完整的 node_modules
+# 跨平台构建：宿主机 Mac arm64，目标 linux/amd64，需显式安装 linux rollup 原生模块
 FROM base-deps AS data-provider-build
 WORKDIR /app
 COPY packages/data-provider ./packages/data-provider
 ENV NODE_OPTIONS="--max-old-space-size=4096"
+RUN npm install @rollup/rollup-linux-x64-gnu --no-save --legacy-peer-deps 2>/dev/null || true
 WORKDIR /app/packages/data-provider
 RUN npm run build
 
@@ -151,6 +190,7 @@ WORKDIR /app
 COPY packages/data-schemas ./packages/data-schemas
 COPY --from=data-provider-build /app/packages/data-provider/dist /app/packages/data-provider/dist
 ENV NODE_OPTIONS="--max-old-space-size=4096"
+RUN npm install @rollup/rollup-linux-x64-gnu --no-save --legacy-peer-deps 2>/dev/null || true
 WORKDIR /app/packages/data-schemas
 RUN npm run build
 
@@ -162,6 +202,7 @@ COPY packages/api ./packages/api
 COPY --from=data-provider-build /app/packages/data-provider/dist /app/packages/data-provider/dist
 COPY --from=data-schemas-build /app/packages/data-schemas/dist /app/packages/data-schemas/dist
 ENV NODE_OPTIONS="--max-old-space-size=8192"
+RUN npm install @rollup/rollup-linux-x64-gnu --no-save --legacy-peer-deps 2>/dev/null || true
 WORKDIR /app/packages/api
 RUN npm run build
 
@@ -191,10 +232,38 @@ RUN test -d "/app/client/dist" || (echo "ERROR: client/dist not found. Please bu
 FROM base-min AS api-build
 # Add `uv` for extended MCP support (required for MCP functionality)
 # 注意：Python、vips 和构建工具已在 base-min 阶段安装
-# 使用 pip 安装 uv，避免 astral.sh 安装脚本的 curl HTTP2/网络问题
-RUN pip3 install -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com \
-    --break-system-packages uv && \
-    uv --version && echo "✓ uv installed successfully"
+# 安装策略：优先 GitHub Release 拉取静态 uv 二进制（避免 pip 下载 25MB wheel 在国内镜像易超时）；
+# 失败则依次用 pip：清华 -> 阿里云 -> 官方 PyPI，并加长超时与重试。
+ARG UV_VERSION=0.6.13
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "$ARCH" in \
+      amd64) UV_ARCH=x86_64-unknown-linux-gnu ;; \
+      arm64) UV_ARCH=aarch64-unknown-linux-gnu ;; \
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac; \
+    if curl -fsSL --connect-timeout 30 --max-time 900 --retry 10 --retry-delay 5 \
+      -o /tmp/uv.tgz "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_ARCH}.tar.gz"; then \
+      tar -xzf /tmp/uv.tgz --strip-components=1 -C /usr/local/bin; \
+      rm -f /tmp/uv.tgz; \
+      chmod +x /usr/local/bin/uv; \
+    else \
+      pip3 install --break-system-packages \
+        --default-timeout=600 --retries=30 \
+        -i https://pypi.tuna.tsinghua.edu.cn/simple \
+        --trusted-host pypi.tuna.tsinghua.edu.cn \
+        "uv==${UV_VERSION}" \
+      || pip3 install --break-system-packages \
+        --default-timeout=600 --retries=30 \
+        -i https://mirrors.aliyun.com/pypi/simple/ \
+        --trusted-host mirrors.aliyun.com \
+        "uv==${UV_VERSION}" \
+      || pip3 install --break-system-packages \
+        --default-timeout=600 --retries=30 \
+        "uv==${UV_VERSION}"; \
+    fi; \
+    uv --version; \
+    echo "uv installed successfully"
 WORKDIR /app
 # Copy package files and agents-because dist before installing dependencies
 COPY package*.json ./
@@ -211,11 +280,18 @@ RUN npm config set registry https://registry.npmmirror.com && \
     npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 15000
 # Install only production deps
-# 由于已安装 vips 和 libvips-dev，sharp 会自动使用系统 libvips，避免下载二进制文件
+# sharp@0.33+（根依赖）可走系统 libvips + SHARP_FORCE_GLOBAL_LIBVIPS；嵌套 sharp@0.32（@xenova）仍会拉 libvips 预编译包，
+# base-min 已通过 ENV npm_config_sharp_libvips_binary_host 走 npmmirror，避免直连 GitHub。
 # 使用 npm install --legacy-peer-deps 替代 npm ci，解决 @langchain/core 版本冲突
 RUN npm install --omit=dev --legacy-peer-deps
 # Certain build artifacts need mongodb runtime deps (may not be prod deps)
 RUN npm install mongodb --omit=dev --legacy-peer-deps
+# 跨平台构建：宿主机 Mac arm64 → 容器 linux/amd64
+# npm install 可能从 package-lock.json 安装了 @sharp/darwin-arm64，需显式安装 linux-x64 原生模块
+# sharp 0.33+ 使用 @sharp/linux-x64 可选包
+RUN npm install @sharp/linux-x64 --no-save --legacy-peer-deps 2>/dev/null || \
+    npm install @img/sharp-linux-x64 --no-save --legacy-peer-deps 2>/dev/null || true
+RUN node -e "require('sharp'); console.log('✓ sharp linux binding OK', require('sharp').versions);"
 # Fix case-sensitive imports: @Because/* -> @because/*
 RUN ln -s /app/node_modules/@because /app/node_modules/@Because || true
 # 验证关键依赖是否正确安装（特别是 @xenova/transformers）

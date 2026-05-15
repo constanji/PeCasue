@@ -29,6 +29,7 @@ const user = require('./user');
 const mcp = require('./mcp');
 const rag = require('./rag');
 const benchmark = require('./benchmark');
+const pipeline = require('./pipeline');
 
 module.exports = {
   mcp,
@@ -62,4 +63,5 @@ module.exports = {
   accessPermissions,
   rag,
   benchmark,
+  pipeline,
 };

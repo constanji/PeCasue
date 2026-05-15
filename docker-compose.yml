@@ -8,6 +8,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      pipeline-svc:
+        condition: service_started
       meilisearch:
         condition: service_started
     # depends_on:
@@ -25,6 +27,7 @@ services:
       - MONGO_URI=mongodb://pecause-mongodb:27017/pecauseAi
       - MEILI_HOST=http://meilisearch:7700
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
+      - PIPELINE_SVC_URL=http://pipeline-svc:8001
       # RAG API 已本地化，使用 ONNX 模型，不再需要外部服务
       # - RAG_PORT=${RAG_PORT:-9102}
       # - RAG_API_URL=http://rag_api:8000
@@ -45,6 +48,19 @@ services:
       #- ./client/dist:/app/client/dist
       #- ./client/public/assets:/app/client/public/assets
       #- ./client/public/fonts:/app/client/public/fonts
+  pipeline-svc:
+    image: ${PIPELINE_IMAGE:-pecause-pipeline-svc:latest}
+    restart: always
+    environment:
+      - PIPELINE_DATA_DIR=/data/pipeline
+    volumes:
+      - ./pipeline-data:/data/pipeline
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/api/pipeline/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
   mongodb:
     image: mongo
     restart: always

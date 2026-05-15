@@ -1,0 +1,43 @@
+# 复制为 docker-compose.override.yaml 后与 docker-compose.yml 自动合并。
+# Pipeline 侧车：与 api 同属 Compose 默认网络，服务名 pipeline-svc 可解析。
+#
+# 构建与启动：
+#   cp docker-compose.override.yaml.example docker-compose.override.yaml
+#   docker compose build pipeline-svc
+#   docker compose up -d
+#
+# 验证连通性（在 api 容器内，可选）：
+#   docker compose exec api wget -qO- http://pipeline-svc:8001/api/pipeline/health
+
+services:
+  api:
+    depends_on:
+      pipeline-svc:
+        condition: service_healthy
+    environment:
+      # 与 routes/pipeline.js 一致：整 URL 优先生效
+      - PIPELINE_SVC_URL=http://pipeline-svc:8001
+
+  pipeline-svc:
+    build:
+      context: ./pipeline-svc
+      dockerfile: Dockerfile
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_REGISTRY_USER:-constanjin}/${IMAGE_PREFIX:-pecause}-pipeline:${IMAGE_TAG:-latest}
+    restart: always
+    environment:
+      - PIPELINE_DATA_DIR=/data/pipeline
+      # 按需取消注释或写入 .env，由 compose 的 env_file 引入
+      # - PIPELINE_LLM_ENABLED=1
+    volumes:
+      - pipeline_svc_data:/data/pipeline
+    expose:
+      - "8001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/api/pipeline/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  pipeline_svc_data:

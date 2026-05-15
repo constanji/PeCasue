@@ -36,8 +36,6 @@ const {
   TavilySearchResults,
   createOpenAIImageTools,
   Speckit,
-  SocialMedia,
-  BaziAstrology,
   DatabaseSchema,
   SqlExecutor,
   BeCause,
@@ -195,8 +193,6 @@ const loadTools = async ({
     because_skills: BeCauseSkills, // BeCause问数工具 - 统一的智能问数能力集
     because_skills_2: BeCauseSkills2, // BeCause问数工具2.0 - 波动归因增强版
     database_schema: DatabaseSchema,
-    social: SocialMedia,
-    bazi_astrology: BaziAstrology,
     sql_executor: SqlExecutor,
     semantic_model_generator: SemanticModelGenerator,
     generate_excel: GenerateExcel,
@@ -262,12 +258,6 @@ const loadTools = async ({
     dalle: imageGenOptions,
     'stable-diffusion': imageGenOptions,
     // 为需要访问模板文件的工具传递正确的项目根目录
-    bazi_astrology: {
-      projectRoot: paths.root,
-    },
-    social: {
-      projectRoot: paths.root,
-    },
     speckit: {
       projectRoot: paths.root,
     },

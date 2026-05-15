@@ -89,7 +89,11 @@ export default function SpreadsheetNativeViewer({ blob, onParseError }: Spreadsh
       return null;
     }
     try {
-      const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
+      const wb = XLSX.read(arrayBuffer, {
+        type: 'array',
+        cellDates: true,
+        sheetRows: MAX_ROWS + 2,
+      });
       return { wb } as const;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

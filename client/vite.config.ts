@@ -14,6 +14,15 @@ const backendPort =
   1245;
 const backendURL = process.env.HOST ? `http://${process.env.HOST}:${backendPort}` : `http://localhost:${backendPort}`;
 
+const pipelineSvcPort =
+  (process.env.VITE_PIPELINE_SVC_PORT && Number(process.env.VITE_PIPELINE_SVC_PORT)) ||
+  (process.env.PIPELINE_SVC_PORT && Number(process.env.PIPELINE_SVC_PORT)) ||
+  8001;
+const pipelineSvcURL = process.env.PIPELINE_SVC_URL
+  || (process.env.HOST
+    ? `http://${process.env.HOST}:${pipelineSvcPort}`
+    : `http://localhost:${pipelineSvcPort}`);
+
 export default defineConfig(({ command }) => ({
   base: '',
   server: {
@@ -22,6 +31,11 @@ export default defineConfig(({ command }) => ({
     port: (process.env.VITE_DEV_PORT && Number(process.env.VITE_DEV_PORT)) || 4614,
     strictPort: false,
     proxy: {
+      // Pipeline sidecar has highest specificity; matches before generic '/api'.
+      '/api/pipeline': {
+        target: pipelineSvcURL,
+        changeOrigin: true,
+      },
       '/api': {
         target: backendURL,
         changeOrigin: true,
@@ -57,7 +71,7 @@ export default defineConfig(({ command }) => ({
         ],
         globIgnores: ['images/**/*', '**/*.map', 'index.html'],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
-        navigateFallbackDenylist: [/^\/oauth/, /^\/api/],
+        navigateFallbackDenylist: [/^\/oauth/, /^\/api/, /^\/office-preview/],
       },
       includeAssets: [],
       manifest: {
@@ -107,6 +121,10 @@ export default defineConfig(({ command }) => ({
     outDir: './dist',
     minify: 'terser',
     rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        officePreview: path.resolve(__dirname, 'office-preview.html'),
+      },
       preserveEntrySignatures: 'strict',
       output: {
         manualChunks(id: string) {

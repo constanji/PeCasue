@@ -1,17 +1,23 @@
+name: pecause
+
 services:
   api:
    # build:
      # context: .
      # dockerfile: Dockerfile
     image: pecause:latest  # 使用本地构建的镜像
+    # 与常见 x86 云主机一致；在 Mac(ARM) 上 buildx/save 时须显式 --platform linux/amd64
+    platform: linux/amd64
     container_name: pecause-api
     ports:
       - 4182:3080
     depends_on:
-      - mongodb
-      # meilisearch:  # 已禁用MeiliSearch服务
-      # RAG API 已本地化，使用 ONNX 模型，不再需要外部服务
-      # - rag_api
+      mongodb:
+        condition: service_healthy
+      pipeline-svc:
+        condition: service_healthy
+      vectordb:
+        condition: service_healthy
     restart: always
     networks:
       - pecause-network
@@ -24,6 +30,13 @@ services:
       - PORT=3080
       - NODE_ENV=production
       - MONGO_URI=mongodb://pecause-mongodb:27017/pecauseAi
+      - PIPELINE_SVC_URL=http://pipeline-svc:8001
+      - CONFIG_PATH=/app/Because.yaml
+      - VECTOR_DB_HOST=vectordb
+      - VECTOR_DB_PORT=5432
+      - VECTOR_DB_NAME=pecause_vector
+      - VECTOR_DB_USER=pecause_user
+      - VECTOR_DB_PASSWORD=pecause_password
       # MeiliSearch 已禁用
       # - MEILI_HOST=http://meilisearch:7700
       # - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
@@ -39,9 +52,28 @@ services:
       - ./images:/app/client/public/images
       - ./uploads:/app/uploads
       - ./logs:/app/api/logs
+  pipeline-svc:
+    image: pecause-pipeline-svc:latest
+    platform: linux/amd64
+    container_name: pecause-pipeline-svc
+    restart: always
+    networks:
+      - pecause-network
+    environment:
+      - PIPELINE_DATA_DIR=/data/pipeline
+    volumes:
+      - ./pipeline-data:/data/pipeline
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/api/pipeline/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      # 首启导入较重或为弱机型时，25s 内未就绪会导致误判 unhealthy，拖累 api 启动
+      start_period: 90s
 
   client:
     image: nginx:1.27.0-alpine
+    platform: linux/amd64
     container_name: pecause-nginx
     ports:
       # 如果 80/443 端口被占用，可以改为其他端口，如 8180:80 和 8543:443
@@ -49,7 +81,8 @@ services:
       - 8180:80
       - 8543:443
     depends_on:
-      - api
+      api:
+        condition: service_started
     restart: always
     networks:
       - pecause-network
@@ -58,15 +91,22 @@ services:
       
   mongodb:
     container_name: pecause-mongodb
-    # ports:  # Uncomment this to access mongodb from outside docker, not safe in deployment
+    # ports:  # Uncomment this to access mongodb from outside docker, not safe for deployment
     #   - 27018:27017
     image: mongo
+    platform: linux/amd64
     restart: always
     networks:
       - pecause-network
     volumes:
       - ./data-node-pecause:/data/db
     command: mongod --noauth --bind_ip_all
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
   # meilisearch:  # 已禁用MeiliSearch服务
   #   container_name: pecause-meilisearch
   #   image: getmeili/meilisearch:v1.12.3
@@ -86,6 +126,7 @@ services:
   vectordb:
     container_name: pecause-vectordb
     image: pgvector/pgvector:0.8.0-pg15-trixie
+    platform: linux/amd64
     environment:
       POSTGRES_DB: pecause_vector
       POSTGRES_USER: pecause_user
@@ -95,6 +136,12 @@ services:
       - pecause-network
     volumes:
       - pgdata2:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pecause_user -d pecause_vector"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
   # RAG API 服务已本地化，使用 ONNX 模型，不再需要外部服务
   # rag_api:
   #   container_name: pecause-rag-api
